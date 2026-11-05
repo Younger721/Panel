@@ -287,7 +287,7 @@ CREATE TABLE interview_report (
 | **P0 纠偏** ✅ | 角色域替换、Java 21、`.env`、启动验证 | `RoleCode`+`PermissionCatalog`+21 处引用；pom | 1.5 | 应用能起来，`admin` 登录，`/actuator/health` UP，现有 chat/stream 仍可用 |
 | **P1 简历** 🟡 60% | 上传→解析→结构化（标签/脱敏待补） | 已建 `interview/**`（实体/仓储/服务/worker/控制器）+ `AsyncJobDispatcher`；复用 `DocumentParserRegistry`、`completeStructuredJson`、`KnowledgeObjectStore`、`PersistentJobQueue` | 3 | 传一份简历异步解析出 `{skills, years, projects, education, highlights, summary}`；**已验证**；缺 `PromptInjectionGuard` 与 tags |
 | **P2 岗位匹配** | 岗位库 + 向量召回 + 差距分析 | `JobPosting` 入库（走同一 RAG 链路）、`JobMatchingService` | 3 | 给定简历+JD，返回 score 与 3 条以上可解释差距 |
-| **P3 多 Agent 面试** | `AgentRuntime`+5 Agent+`InterviewGraph`+会话 SSE | `interview/agent/**`、`InterviewSessionService`、`InterviewController` | 6 | 跑完 8 轮面试；连续两轮题型不重复；断线可续；每步 trace 落库 |
+| **P3 多 Agent 面试** 🟡 70% | 5 Agent + 状态机已跑通；SSE/断线续订待做 | 已建 `interview/agent/**`（Planner/Interviewer/Evaluator/Reviewer/Report）、`InterviewService`、`InterviewController`、`interview_session`/`interview_turn` | 6 | ✅ 跑完 3 轮真实面试（87/85/10 → 总分 61 由代码重算）；✅ 考察点不重复；✅「不知道」判 0 分；缺 SSE 与断线续订 |
 | **P4 评估复核** | rubric 打分 + Reviewer 调分 + 报告 | `EvaluatorAgent`、`ReviewerAgent`、`AssessmentReportService` | 4 | 每个扣分点都能定位到回答原文片段；Reviewer 调分有理由记录 |
 | **P5 Kafka** | 队列/事件总线 + compose | `KafkaPersistentJobQueue`（或事件监听）、compose kafka、dev yml 开关 | 2 | 杀进程后任务不丢；重复消费不重复生成报告 |
 | **P6 可选** | 虚拟线程并发、成本报表 | `Executors.newVirtualThreadPerTaskExecutor()`、用量聚合 | 1.5 | 并发路段（Resume/JobMatch）耗时下降，单场面试成本可见 |
@@ -310,6 +310,33 @@ CREATE TABLE interview_report (
 | 未做 | `PromptInjectionGuard` 接入、`tags`、SSE 进度推送、PDF 实文件回归 |
 
 > 顺带修掉一个真实缺陷：`JdbcJobStateStore.enqueue` 原来用 `Instant.EPOCH` 写 `next_attempt_at`，在 UTC 会话下被 MySQL 判为非法时间（`ERROR 1292`），导致入队直接 500。改为数据库 `now(6)`。
+
+### 7.2 P3 实现记录（5 Agent 已跑通）
+
+| Agent | 输入 → 输出 | 代码级约束（不是提示词约束） |
+|---|---|---|
+| Planner | 简历画像 + 轮次 → 考察点矩阵 | 点数必须等于 `turnBudget`，否则抛异常 |
+| Interviewer | 矩阵 + 已问题目 → 下一题 | `pointId` 必须存在且未被覆盖，重复即拒绝 |
+| Evaluator | 题目 + 回答 → 四维分数 + 证据 | 无 `evidence.quote` 视为无效评分 |
+| Reviewer | 题目 + 回答 + 评分 → 调分/确认 | 只在「无证据 / 有内容却判 0 分」时触发，不重复打分 |
+| Report | 逐题记录 → 报告正文 | **不采信模型总分**，由代码按逐题分数重算 |
+
+接口：`POST /api/v1/interview/sessions`（201）、`POST /sessions/{id}/answers`、`GET /sessions/{id}`、`GET /sessions/{id}/report`。
+
+实测（简历=张伟，`turnBudget=3`，模型 `deepseek-v4.1-flash-1017`）：
+
+| 轮次 | 考察点 | 耗时 | 得分 | 证据条数 |
+|---|---|---|---|---|
+| Q1 | Redis / ADVANCED | 5s（建会话含 Planner） | 87 | 2 |
+| Q2 | Kafka / ADVANCED | 4s | 85 | 2 |
+| Q3 | Spring Cloud / EXPERT | 8s | 10 | 2 |
+| 报告 | — | 1 次调用 | 总分 61 = ⌊(87+85+10)/3⌋ | — |
+
+- 三轮考察点无重复，题目全部来自简历真实技术栈；
+- 故意敷衍的 Spring Cloud 回答被判 10 分，报告准确指出「完全未触及任何组件」；
+- 「不知道，没做过」类回答 → 0 分、`answered=false`、feedback 给出该补的知识点。
+
+未做：SSE 流式与断线续订（当前为同步接口）、Reviewer 触发路径的构造用例、每步 trace 落库。
 
 ---
 
