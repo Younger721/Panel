@@ -3,6 +3,10 @@ spring:
     name: nova-ai-backend
   profiles:
     default: dev
+  # 直接以 properties 语义加载仓库根 .env：不依赖自定义 EnvironmentPostProcessor 的注册，
+  # 缺文件时 optional 不会启动失败。OS 环境变量优先级仍高于这里。
+  config:
+    import: "optional:file:../.env[.properties],optional:file:./.env[.properties]"
   # 简历上传：默认 1MB 放不下带图的 PDF/DOCX
   servlet:
     multipart:

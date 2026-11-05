@@ -60,9 +60,14 @@ public class ResumeService {
         String safeName = sanitize(fileName);
         String hash = sha256(bytes);
 
-        // 同一份文件重复上传：直接复用原记录，避免重复烧模型 token
+        // 同一份文件重复上传：复用原记录，避免重复烧模型 token；
+        // 但若上一次没解析成功（PENDING 中断 / FAILED），必须重新投一次任务，
+        // 否则用户重传同一份简历永远拿不到画像。
         Resume existing = resumes.findByContentHash(hash).orElse(null);
         if (existing != null) {
+            if (existing.getStatus() != ResumeStatus.PARSED) {
+                jobs.enqueue(ResumeParseWorker.JOB_TYPE + ":" + existing.getId(), null);
+            }
             return view(existing);
         }
 

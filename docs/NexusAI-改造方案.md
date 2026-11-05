@@ -305,7 +305,9 @@ CREATE TABLE interview_report (
 | 路由 | 新增 `AsyncJobHandler` 接口：知识入库与简历解析共用一张 `async_job` 表，靠 `type` 前缀分发，避免互相误领 |
 | 幂等 | 已 `PARSED` 直接完成；内容 SHA-256 去重；重试 3 次后置 `FAILED` 并保留 `last_error` |
 | 已验证 | 上传→建任务→领取→失败回落全链路；`PARSED` 详情与 profile 读取；中文 JSON 往返 |
-| 未做 | `PromptInjectionGuard` 接入、`tags`、SSE 进度推送、DOCX/PDF 实文件回归 |
+| 模型 | `deepseek-v4.1-flash-1017`（`.env` 的 `DASHSCOPE_CHAT_MODEL`）；一份 DOCX 简历 5 秒内解析出 10 项技能/4 条亮点 |
+| 配置修复 | `.env` 原本**从未被加载**（`META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor` 不是 Spring Boot 认的注册格式）。改为正确的 `META-INF/spring.factories` + `spring.config.import` 双保险 |
+| 未做 | `PromptInjectionGuard` 接入、`tags`、SSE 进度推送、PDF 实文件回归 |
 
 > 顺带修掉一个真实缺陷：`JdbcJobStateStore.enqueue` 原来用 `Instant.EPOCH` 写 `next_attempt_at`，在 UTC 会话下被 MySQL 判为非法时间（`ERROR 1292`），导致入队直接 500。改为数据库 `now(6)`。
 

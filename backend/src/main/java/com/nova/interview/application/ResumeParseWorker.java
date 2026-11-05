@@ -82,7 +82,7 @@ public class ResumeParseWorker implements AsyncJobHandler {
             profile.replace(outcome.normalizedJson(),
                     outcome.parsed().yearsOfExperience(),
                     outcome.parsed().skills().size(),
-                    null);
+                    outcome.modelName());
             profiles.save(profile);
 
             resume.markParsed();

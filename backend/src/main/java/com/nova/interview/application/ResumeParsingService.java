@@ -47,10 +47,13 @@ public class ResumeParsingService {
     private final ChatModelGateway gateway;
     private final ObjectMapper objectMapper;
     private final DocumentParserRegistry parsers = DocumentParserRegistry.standard();
+    private final String modelName;
 
-    public ResumeParsingService(ChatModelGateway gateway, ObjectMapper objectMapper) {
+    public ResumeParsingService(ChatModelGateway gateway, ObjectMapper objectMapper,
+                                com.nova.ai.infrastructure.bailian.DashScopeProperties dashScope) {
         this.gateway = gateway;
         this.objectMapper = objectMapper;
+        this.modelName = dashScope.getChatModel();
     }
 
     /**
@@ -69,9 +72,9 @@ public class ResumeParsingService {
         try {
             ParsedResume parsed = objectMapper.readValue(json, ParsedResume.class);
             String normalized = objectMapper.writeValueAsString(parsed);
-            log.info("Resume parsed: id={}, skills={}, projects={}", resumeId,
+            log.info("Resume parsed: id={}, model={}, skills={}, projects={}", resumeId, modelName,
                     parsed.skills().size(), parsed.projects().size());
-            return new ParseOutcome(parsed, normalized);
+            return new ParseOutcome(parsed, normalized, modelName);
         } catch (Exception ex) {
             throw new IllegalStateException("model returned unparsable resume JSON: " + abbreviate(json), ex);
         }
@@ -94,6 +97,6 @@ public class ResumeParsingService {
         return value.length() <= 200 ? value : value.substring(0, 200) + "...";
     }
 
-    public record ParseOutcome(ParsedResume parsed, String normalizedJson) {
+    public record ParseOutcome(ParsedResume parsed, String normalizedJson, String modelName) {
     }
 }
