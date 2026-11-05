@@ -89,18 +89,34 @@ public class InterviewService {
 
     @Transactional
     public SessionView create(Long resumeId, Integer requestedTurns) {
+        return create(resumeId, requestedTurns, InterviewProgressListener.NOOP);
+    }
+
+    @Transactional
+    public SessionView create(Long resumeId, Integer requestedTurns, InterviewProgressListener listener) {
         int budget = clampTurns(requestedTurns);
         ParsedResume resume = loadResume(resumeId);
 
+        long planStart = System.currentTimeMillis();
+        listener.onEvent("agent", AgentEvent.started("Planner", "生成考察点矩阵"));
         InterviewPlan plan = planner.plan(resume, budget);
-        InterviewSession session = sessions.save(InterviewSession.create(resumeId, budget, write(plan)));
+        listener.onEvent("agent", AgentEvent.finished("Planner", "考察点矩阵",
+                plan.points().size() + " 个考察点", plan.points().size(), planStart));
 
+        InterviewSession session = sessions.save(InterviewSession.create(resumeId, budget, write(plan)));
+        listener.onEvent("session", detail(session.getId()));
+
+        long askStart = System.currentTimeMillis();
+        listener.onEvent("agent", AgentEvent.started("Interviewer", "出第 1 题"));
         QuestionDraft first = interviewer.next(plan, List.of());
+        listener.onEvent("agent", AgentEvent.finished("Interviewer", "出题", "第 1 题", 1, askStart));
+
         InterviewTurn turn = turns.save(InterviewTurn.ask(session.getId(), 1, first.pointId(),
                 plan.point(first.pointId()).skill(), first.difficulty(), first.question(), first.intent(),
                 write(first.followUps())));
         session.markInProgress(1);
         sessions.save(session);
+        listener.onEvent("question", toQuestion(turn));
         log.info("Interview created: id={}, resumeId={}, turns={}, firstPoint={}",
                 session.getId(), resumeId, budget, first.pointId());
         return detail(session.getId());
@@ -108,6 +124,11 @@ public class InterviewService {
 
     @Transactional
     public AnswerResult answer(Long sessionId, String answerText) {
+        return answer(sessionId, answerText, InterviewProgressListener.NOOP);
+    }
+
+    @Transactional
+    public AnswerResult answer(Long sessionId, String answerText, InterviewProgressListener listener) {
         if (answerText == null || answerText.isBlank()) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
@@ -120,28 +141,49 @@ public class InterviewService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.CONFLICT));
         turn.answer(answerText.trim());
 
+        long evalStart = System.currentTimeMillis();
+        listener.onEvent("agent", AgentEvent.started("Evaluator", "评分并提取证据"));
         TurnEvaluation evaluation = evaluator.evaluate(turn.getQuestion(), turn.getSkill(), turn.getAnswer());
-        ReviewDecision review = suspicious(evaluation, answerText) ? reviewer.review(turn.getQuestion(),
-                turn.getAnswer(), evaluation) : null;
+        listener.onEvent("agent", AgentEvent.finished("Evaluator", "评分",
+                "第 " + turn.getSeq() + " 题", 1, evalStart));
+
+        ReviewDecision review = null;
+        if (suspicious(evaluation, answerText)) {
+            long reviewStart = System.currentTimeMillis();
+            listener.onEvent("agent", AgentEvent.started("Reviewer", "复核评分与证据是否矛盾"));
+            review = reviewer.review(turn.getQuestion(), turn.getAnswer(), evaluation);
+            listener.onEvent("agent", AgentEvent.finished("Reviewer", "复核",
+                    review.adjusted() ? "已调整" : "维持原分", review.adjustments().size(), reviewStart));
+        }
         int finalScore = applyReview(evaluation, review);
         turn.evaluated(write(evaluation), finalScore, feedbackOf(evaluation, review),
                 review == null ? null : write(review));
         turns.save(turn);
+        listener.onEvent("evaluation", toView(turn));
 
         if (turn.getSeq() >= session.getTurnBudget()) {
+            long reportStart = System.currentTimeMillis();
+            listener.onEvent("agent", AgentEvent.started("Report", "生成本场报告"));
             String reportJson = finish(session, turns.findBySessionId(sessionId));
+            listener.onEvent("agent", AgentEvent.finished("Report", "报告", "已生成", 1, reportStart));
+            listener.onEvent("report", read(reportJson));
             return new AnswerResult(toView(turn), null, session.getStatus(), session.getOverallScore(),
                     read(reportJson));
         }
 
         InterviewPlan plan = readPlan(session.getPlanJson());
         List<InterviewTurn> answered = turns.findBySessionId(sessionId);
+        long askStart = System.currentTimeMillis();
+        listener.onEvent("agent", AgentEvent.started("Interviewer", "出下一题"));
         QuestionDraft next = interviewer.next(plan, answered);
+        listener.onEvent("agent", AgentEvent.finished("Interviewer", "出题",
+                "第 " + (turn.getSeq() + 1) + " 题", 1, askStart));
         InterviewTurn nextTurn = turns.save(InterviewTurn.ask(sessionId, turn.getSeq() + 1, next.pointId(),
                 plan.point(next.pointId()).skill(), next.difficulty(), next.question(), next.intent(),
                 write(next.followUps())));
         session.markInProgress(nextTurn.getSeq());
         sessions.save(session);
+        listener.onEvent("question", toQuestion(nextTurn));
         return new AnswerResult(toView(turn), toQuestion(nextTurn), session.getStatus(),
                 session.getOverallScore(), null);
     }

@@ -287,7 +287,7 @@ CREATE TABLE interview_report (
 | **P0 纠偏** ✅ | 角色域替换、Java 21、`.env`、启动验证 | `RoleCode`+`PermissionCatalog`+21 处引用；pom | 1.5 | 应用能起来，`admin` 登录，`/actuator/health` UP，现有 chat/stream 仍可用 |
 | **P1 简历** 🟡 60% | 上传→解析→结构化（标签/脱敏待补） | 已建 `interview/**`（实体/仓储/服务/worker/控制器）+ `AsyncJobDispatcher`；复用 `DocumentParserRegistry`、`completeStructuredJson`、`KnowledgeObjectStore`、`PersistentJobQueue` | 3 | 传一份简历异步解析出 `{skills, years, projects, education, highlights, summary}`；**已验证**；缺 `PromptInjectionGuard` 与 tags |
 | **P2 岗位匹配** | 岗位库 + 向量召回 + 差距分析 | `JobPosting` 入库（走同一 RAG 链路）、`JobMatchingService` | 3 | 给定简历+JD，返回 score 与 3 条以上可解释差距 |
-| **P3 多 Agent 面试** 🟡 70% | 5 Agent + 状态机已跑通；SSE/断线续订待做 | 已建 `interview/agent/**`（Planner/Interviewer/Evaluator/Reviewer/Report）、`InterviewService`、`InterviewController`、`interview_session`/`interview_turn` | 6 | ✅ 跑完 3 轮真实面试（87/85/10 → 总分 61 由代码重算）；✅ 考察点不重复；✅「不知道」判 0 分；缺 SSE 与断线续订 |
+| **P3 多 Agent 面试** 🟢 85% | 5 Agent + 状态机 + SSE 已跑通；断线续订待做 | `interview/agent/**`（5 Agent）、`InterviewService`、`InterviewController`（同步 + SSE 双接口）、`interview_session`/`interview_turn` | 6 | ✅ 跑完 3 轮真实面试（87/85/10 → 总分 61 由代码重算）；✅ 考察点不重复；✅「不知道」判 0 分；✅ SSE 逐 Agent 上报；缺 `Last-Event-ID` 重放 |
 | **P4 评估复核** | rubric 打分 + Reviewer 调分 + 报告 | `EvaluatorAgent`、`ReviewerAgent`、`AssessmentReportService` | 4 | 每个扣分点都能定位到回答原文片段；Reviewer 调分有理由记录 |
 | **P5 Kafka** | 队列/事件总线 + compose | `KafkaPersistentJobQueue`（或事件监听）、compose kafka、dev yml 开关 | 2 | 杀进程后任务不丢；重复消费不重复生成报告 |
 | **P6 可选** | 虚拟线程并发、成本报表 | `Executors.newVirtualThreadPerTaskExecutor()`、用量聚合 | 1.5 | 并发路段（Resume/JobMatch）耗时下降，单场面试成本可见 |
@@ -337,6 +337,23 @@ CREATE TABLE interview_report (
 - 「不知道，没做过」类回答 → 0 分、`answered=false`、feedback 给出该补的知识点。
 
 未做：SSE 流式与断线续订（当前为同步接口）、Reviewer 触发路径的构造用例、每步 trace 落库。
+
+### 7.3 SSE 流式（P3 收尾）
+
+同一套编排代码通过 `InterviewProgressListener` 输出进度：同步接口传 `NOOP`，流式接口传"写 `SseEmitter`"的实现，**不为流式复制第二套流程**。
+
+| 接口 | 事件序列 |
+|---|---|
+| `POST /api/v1/interview/sessions/stream` | `agent`(Planner STARTED/COMPLETED) → `session` → `agent`(Interviewer) → `question` → `done` |
+| `POST /api/v1/interview/sessions/{id}/answers/stream` | `agent`(Evaluator) → `evaluation` → `agent`(Interviewer) → `question` → `done`；最后一轮把 `question` 换成 `report` |
+
+- 执行线程用 `Executors.newVirtualThreadPerTaskExecutor()`：模型调用是阻塞 IO，不占 Tomcat 线程；
+- 每个 `agent` 事件带 `durationMs`，前端可直接画"Planner 2.7s / Interviewer 1.4s"；
+- 客户端断开时抛 `IllegalStateException`，事务回滚，不会出现"界面断了但后台继续扣 token"。
+
+实测事件（`turnBudget=3`）：Planner 2749ms → Interviewer 1369ms → Evaluator 2827ms（含 2 条原文证据 + 4 条扣分理由）→ Interviewer 1610ms → … → `report`。
+
+未做：`Last-Event-ID` 断线重放（当前重连续需重新拉一次 `GET /sessions/{id}`）、Reviewer 触发路径的构造用例、每步 trace 落库。
 
 ---
 
