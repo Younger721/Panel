@@ -13,7 +13,7 @@ RAG 简历分析 + 模拟面试项目的 **AI 内核 / 中间件底座**。
 | 项 | 结果 |
 |---|---|
 | Java 源文件 | 422 个（`backend/src/main/java/com/nova`） |
-| 编译（JDK 17） | ✅ `mvn -DskipTests compile` BUILD SUCCESS |
+| 编译（JDK 21） | ✅ `mvn -DskipTests compile` BUILD SUCCESS |
 | 单元测试 | ❌ 未迁移（GymMind 的 236 个测试依赖健身夹具，需按新域重写） |
 | 启动验证 | ⏳ 未验证（需 MySQL + Redis + ES + Milvus 就绪） |
 | 前端 | 仅 3 个可复用工具文件，非完整工程 |
@@ -42,7 +42,7 @@ Nova AI/
 │           ├── application.yml       主配置（nova.* 前缀）
 │           ├── application-dev.yml   本地开发配置
 │           └── META-INF/spring/…     .env 自动加载
-├── docker-compose.yml                Redis / ES / etcd / MinIO / Milvus（+可选 MySQL）
+├── docker-compose.yml                Redis / ES / etcd / MinIO / Milvus / Kafka（+可选 MySQL）
 ├── docker/elasticsearch/Dockerfile   ES 中文分词自定义镜像
 ├── frontend/src/                     SSE 消费 / 执行图 / 对话 API 封装
 ├── scripts/migrate-from-gymmind.ps1  迁移脚本（幂等）
@@ -146,6 +146,26 @@ start-infrastructure.bat
 
 首次启动 ES / Milvus 约需 1～2 分钟。`docker compose ps` 全部 healthy 即可。
 
+#### 复用已运行的中间件（内容分区）
+
+如果本机已有别的项目（例如 GymMind）的 Redis / MinIO / ES / Milvus 在跑，**不必重复起容器**，只起 Nova 独有的 Kafka 即可：
+
+```bat
+docker compose up -d kafka
+```
+
+两套服务靠命名空间隔离，不会互相污染：
+
+| 资源 | GymMind | Nova |
+|---|---|---|
+| MySQL 库 | `gymmind` | `nova_ai` |
+| ES 索引 | `gymmind-knowledge` | `nova-knowledge`（`NOVA_ES_INDEX`） |
+| Milvus collection | `gymmind_knowledge` | `nova_knowledge`（`NOVA_MILVUS_COLLECTION`） |
+| MinIO bucket | `gymmind` | `nova-ai`（首次上传自动创建） |
+| Redis key | `gymmind:…` | `nova:<env>:v1:…` |
+
+前提是 `application-dev.yml` 里的端口指向那套正在跑的服务（本机默认就是 `6379 / 9000 / 9202 / 19530`）。
+
 ### 5.3 起后端
 
 ```bat
@@ -155,7 +175,7 @@ start-backend-dev.bat
 或手动：
 
 ```powershell
-$env:JAVA_HOME='D:\java\jdk-17.0.14'
+$env:JAVA_HOME='D:\java\jdk-21'
 $env:Path="$env:JAVA_HOME\bin;$env:Path"
 cd backend
 mvn spring-boot:run
@@ -166,7 +186,7 @@ mvn spring-boot:run
 ### 5.4 编译
 
 ```powershell
-$env:JAVA_HOME='D:\java\jdk-17.0.14'
+$env:JAVA_HOME='D:\java\jdk-21'
 mvn -f backend/pom.xml -DskipTests compile
 ```
 

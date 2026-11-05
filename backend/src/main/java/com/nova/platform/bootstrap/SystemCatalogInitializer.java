@@ -117,7 +117,7 @@ public class SystemCatalogInitializer implements ApplicationRunner {
             link(roles.get(RoleCode.PLATFORM_ADMIN), permissions.get(entry.code()));
         }
 
-        for (RoleCode roleCode : Set.of(RoleCode.GYM_ADMIN, RoleCode.COACH, RoleCode.MEMBER)) {
+        for (RoleCode roleCode : Set.of(RoleCode.ADMIN, RoleCode.INTERVIEWER, RoleCode.CANDIDATE)) {
             seedTenantRole(roles.get(roleCode), permissions);
         }
     }
@@ -150,7 +150,7 @@ public class SystemCatalogInitializer implements ApplicationRunner {
             configuredMenus.addAll(PermissionCatalog.defaultMenus(role.getCode()));
         }
         // 健身房管理员始终保留 AI 配置入口
-        if (role.getCode() == RoleCode.GYM_ADMIN) {
+        if (role.getCode() == RoleCode.ADMIN) {
             configuredMenus.add(PermissionCatalog.AI_CONFIG_MENU);
         }
 
@@ -176,9 +176,9 @@ public class SystemCatalogInitializer implements ApplicationRunner {
     private static String displayName(RoleCode code) {
         return switch (code) {
             case PLATFORM_ADMIN -> "Platform administrator";
-            case GYM_ADMIN -> "Gym administrator";
-            case COACH -> "Coach";
-            case MEMBER -> "Member";
+            case ADMIN -> "Administrator";
+            case INTERVIEWER -> "Interviewer";
+            case CANDIDATE -> "Job seeker";
         };
     }
 }

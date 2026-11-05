@@ -60,8 +60,8 @@ public class UserInvitation extends TenantScopedEntity {
             throw new IllegalArgumentException("Tenant id must be positive");
         }
         this.email = normalizeEmail(email);
-        if (role != RoleCode.COACH && role != RoleCode.MEMBER) {
-            throw new IllegalArgumentException("Invitation role must be COACH or MEMBER");
+        if (role != RoleCode.INTERVIEWER && role != RoleCode.CANDIDATE) {
+            throw new IllegalArgumentException("Invitation role must be INTERVIEWER or CANDIDATE");
         }
         this.role = role;
         this.tokenHash = requireHash(tokenHash);

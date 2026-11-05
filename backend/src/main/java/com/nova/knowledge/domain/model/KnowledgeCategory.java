@@ -15,7 +15,7 @@ public enum KnowledgeCategory {
     /** 饮食基础知识 */
     NUTRITION_BASICS,
     /** 健身房规章制度 */
-    GYM_RULES,
+    JOB_RULES,
     /** 常见健身问题 */
     FAQ,
     /** 未归类 */

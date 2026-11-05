@@ -65,7 +65,7 @@ public final class ChunkStrategySelector {
         }
         // 规章制度：关键词命中，或正文出现至少两个「第X条」条款编号
         if (containsAny(c, "制度", "规定", "办法", "条例", "章程", "细则", "守则", "条款",
-                "规则", "安全", "RULE", "POLICY", "REGULATION", "COMPLIANCE", "GYM_RULES")
+                "规则", "安全", "RULE", "POLICY", "REGULATION", "COMPLIANCE", "JOB_RULES")
                 || containsAny(name, "rule", "policy", "regulation", "制度", "规定", "办法",
                 "条例", "章程", "细则", "守则")
                 || countClausePatterns(content) >= 2) {

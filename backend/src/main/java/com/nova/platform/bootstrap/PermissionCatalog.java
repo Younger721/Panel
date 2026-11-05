@@ -25,8 +25,14 @@ public final class PermissionCatalog {
     private static final List<Entry> ENTRIES = List.of(
             new Entry("platform:tenant:read", "Read tenants"),
             new Entry("platform:tenant:write", "Manage tenants"),
+            new Entry("platform:quota:read", "Read tenant quotas"),
+            new Entry("platform:quota:write", "Manage tenant quotas"),
+            new Entry("platform:stats:read", "Read platform statistics"),
+            new Entry("platform:knowledge:read", "Read all tenant knowledge documents"),
+            new Entry("platform:agent:read", "Read all tenant agents"),
             new Entry("tenant:settings:read", "Read tenant settings"),
             new Entry("tenant:settings:write", "Manage tenant settings"),
+            new Entry("tenant:quota:read", "Read tenant quota usage"),
             new Entry("user:read", "Read users"),
             new Entry("user:write", "Manage users"),
             new Entry("role:read", "Read roles"),
@@ -34,82 +40,42 @@ public final class PermissionCatalog {
             new Entry("role:write", "Manage role status"),
             new Entry("role:permission:read", "Read role menu permissions"),
             new Entry("role:permission:write", "Manage role menu permissions"),
-            new Entry("member:read", "Read members"),
-            new Entry("member:write", "Manage members"),
-            new Entry("coach:read", "Read coaches"),
-            new Entry("coach:write", "Manage coaches"),
-            new Entry("coach:assign", "Assign coaches"),
-            new Entry("coach-relation:request", "Request a coach relationship"),
-            new Entry("coach-relation:read", "Read coach relationships"),
-            new Entry("coach-relation:accept", "Accept coach requests"),
-            new Entry("coach-relation:reject", "Reject coach requests"),
-            new Entry("coach-relation:manage", "Manage coach relationships"),
-            new Entry("course:read", "Read courses"),
-            new Entry("course:write", "Manage courses"),
-            new Entry("equipment:catalog:read", "Read equipment catalog"),
-            new Entry("equipment:catalog:write", "Manage equipment catalog"),
-            new Entry("equipment:inventory:read", "Read equipment inventory"),
-            new Entry("equipment:request:read", "Read equipment requests"),
-            new Entry("equipment:request:write", "Submit equipment requests"),
-            new Entry("equipment:request:approve", "Approve equipment requests"),
-            new Entry("equipment:request:deliver", "Register equipment deliveries"),
-            new Entry("equipment:request:receive", "Confirm equipment receipt"),
-            new Entry("equipment:stats:read", "Read equipment statistics"),
-            new Entry("membership:read", "Read membership packages"),
-            new Entry("membership:write", "Manage membership packages"),
-            new Entry("membership:change:request", "Request membership freeze or transfer"),
-            new Entry("membership:change:read", "Read membership change requests"),
-            new Entry("membership:change:approve", "Approve membership change requests"),
-            new Entry("membership:change:cancel", "Cancel pending membership change requests"),
-            new Entry("payment:write", "Record offline payments"),
-            new Entry("order:write", "Create orders"),
-            new Entry("booking:write", "Create bookings"),
-            new Entry("booking:read", "Read course bookings"),
-            new Entry("checkin:write", "Record check-ins"),
-            new Entry("exercise:read", "Read exercises"),
-            new Entry("exercise:write", "Manage exercises"),
-            new Entry("video:read", "Read exercise videos"),
-            new Entry("video:write", "Manage exercise videos"),
-            new Entry("training:read", "Read training plans and records"),
-            new Entry("workout:read", "Read workout plans"),
-            new Entry("workout:write", "Manage workout plans"),
-            new Entry("workout-record:read", "Read workout records"),
-            new Entry("workout-record:write", "Create workout records"),
-            new Entry("nutrition:read", "Read nutrition data"),
-            new Entry("nutrition:write", "Manage nutrition data"),
+            new Entry("resume:read", "Read parsed resumes"),
+            new Entry("resume:write", "Upload and manage resumes"),
+            new Entry("resume:analyze", "Trigger resume structuring and matching"),
+            new Entry("job:read", "Read job postings"),
+            new Entry("job:write", "Manage job postings"),
+            new Entry("job:match", "Run job matching and gap analysis"),
+            new Entry("interview:start", "Start a mock interview"),
+            new Entry("interview:read", "Read interview sessions"),
+            new Entry("interview:answer", "Answer interview questions"),
+            new Entry("report:read", "Read interview reports"),
+            new Entry("report:export", "Export interview reports"),
             new Entry("ai:chat", "Use the AI assistant"),
             new Entry("ai:memory", "Manage personal AI memory"),
-            new Entry("ai:recommend", "Use personalized recommendations"),
-            new Entry("ai:plan", "Generate workout plan drafts"),
             new Entry("ai:report", "View AI generated reports"),
-            new Entry("ai:analysis", "Use AI member and operation analysis"),
+            new Entry("ai:analysis", "Use AI analysis of interviews and candidates"),
             new Entry("agent:read", "List tenant agents"),
             new Entry("agent:write", "Manage tenant agents"),
             new Entry("agent:chat", "Chat with tenant agents"),
-            new Entry("tenant:quota:read", "Read tenant quota usage"),
-            new Entry("platform:quota:read", "Read tenant quotas"),
-            new Entry("platform:quota:write", "Manage tenant quotas"),
-            new Entry("platform:stats:read", "Read platform statistics"),
-            new Entry("platform:knowledge:read", "Read all tenant knowledge documents"),
-            new Entry("platform:agent:read", "Read all tenant agents"),
             new Entry("search:read", "Search imported articles"),
             new Entry("search:write", "Import public articles"),
-            new Entry("audit:read", "Read audit records"),
             new Entry("knowledge:read", "Search knowledge documents"),
             new Entry("knowledge:write", "Manage knowledge documents"),
             new Entry("ocr:use", "Recognize images with OCR"),
-            new Entry("analytics:read", "Read operational analytics"));
+            new Entry("audit:read", "Read audit records"),
+            new Entry("analytics:read", "Read interview analytics"));
 
     private static final List<MenuEntry> MENU_ENTRIES = List.of(
             new MenuEntry("menu:dashboard", "Dashboard"),
             new MenuEntry("menu:assistant", "AI assistant"),
             new MenuEntry(AI_CONFIG_MENU, "AI configuration"),
             new MenuEntry("menu:knowledge", "Knowledge base"),
-            new MenuEntry("menu:operations", "Gym operations"),
-            new MenuEntry("menu:courses", "Courses"),
-            new MenuEntry("menu:equipment", "Equipment"),
-            new MenuEntry("menu:training", "Training"),
-            new MenuEntry("menu:analytics", "Risk and analytics"),
+            new MenuEntry("menu:resume", "Resumes"),
+            new MenuEntry("menu:jobs", "Job postings"),
+            new MenuEntry("menu:interviews", "Mock interviews"),
+            new MenuEntry("menu:reports", "Interview reports"),
+            new MenuEntry("menu:analytics", "Interview analytics"),
             new MenuEntry("menu:admin", "Users and roles"),
             new MenuEntry("menu:tenant-settings", "Tenant settings"),
             new MenuEntry("menu:platform", "Platform console"),
@@ -162,7 +128,7 @@ public final class PermissionCatalog {
      * not necessarily use every operation exposed by the shared menu.
      */
     public static Set<String> operationPermissionsFor(RoleCode roleCode, String menuCode) {
-        if (roleCode == RoleCode.PLATFORM_ADMIN || roleCode == RoleCode.GYM_ADMIN) {
+        if (roleCode == RoleCode.PLATFORM_ADMIN || roleCode == RoleCode.ADMIN) {
             return operationPermissionsFor(menuCode);
         }
         if (roleCode == null || !isMenuAllowedForRole(roleCode, menuCode)) {
@@ -196,21 +162,10 @@ public final class PermissionCatalog {
         mappings.put(AI_CONFIG_MENU, Set.of("agent:read", "agent:write", "agent:chat"));
         mappings.put("menu:knowledge", Set.of(
                 "search:read", "search:write", "knowledge:read", "knowledge:write", "ocr:use"));
-            mappings.put("menu:operations", Set.of(
-                "member:read", "member:write", "coach:read", "coach:write", "coach:assign",
-                "coach-relation:request", "coach-relation:read", "coach-relation:accept",
-                "coach-relation:reject", "coach-relation:manage", "membership:read", "membership:write",
-                "membership:change:request", "membership:change:read", "membership:change:approve",
-                "membership:change:cancel", "payment:write", "order:write", "checkin:write"));
-        mappings.put("menu:courses", Set.of("course:read", "course:write", "booking:read", "booking:write"));
-        mappings.put("menu:equipment", Set.of(
-                "equipment:catalog:read", "equipment:catalog:write", "equipment:inventory:read",
-                "equipment:request:read", "equipment:request:write", "equipment:request:approve",
-                "equipment:request:deliver", "equipment:request:receive", "equipment:stats:read"));
-        mappings.put("menu:training", Set.of(
-                "exercise:read", "exercise:write", "video:read", "video:write", "workout:read",
-                "workout:write", "workout-record:read", "workout-record:write", "nutrition:read",
-                "nutrition:write", "training:read", "ai:recommend", "ai:plan"));
+        mappings.put("menu:resume", Set.of("resume:read", "resume:write", "resume:analyze"));
+        mappings.put("menu:jobs", Set.of("job:read", "job:write", "job:match"));
+        mappings.put("menu:interviews", Set.of("interview:start", "interview:read", "interview:answer"));
+        mappings.put("menu:reports", Set.of("report:read", "report:export"));
         mappings.put("menu:analytics", Set.of("analytics:read", "ai:report", "ai:analysis"));
         mappings.put("menu:admin", Set.of(
                 "user:read", "user:write", "role:read", "role:assign", "role:write", "audit:read"));
@@ -240,38 +195,36 @@ public final class PermissionCatalog {
 
     private static Map<RoleCode, Set<String>> defaults() {
         Map<RoleCode, Set<String>> defaults = new EnumMap<>(RoleCode.class);
-        defaults.put(RoleCode.GYM_ADMIN, Set.of(
-                "menu:dashboard", "menu:assistant", "menu:knowledge", "menu:operations", "menu:courses",
-                "menu:equipment", "menu:training", "menu:analytics", "menu:admin", "menu:tenant-settings",
+        defaults.put(RoleCode.ADMIN, Set.of(
+                "menu:dashboard", "menu:assistant", "menu:knowledge", "menu:resume", "menu:jobs",
+                "menu:interviews", "menu:reports", "menu:analytics", "menu:admin", "menu:tenant-settings",
                 "menu:role-permissions", AI_CONFIG_MENU, "menu:profile"));
-        defaults.put(RoleCode.COACH, Set.of(
-                "menu:dashboard", "menu:assistant", "menu:knowledge", "menu:courses", "menu:training", "menu:profile"));
-        defaults.put(RoleCode.MEMBER, Set.of(
-                "menu:dashboard", "menu:assistant", "menu:courses", "menu:training", "menu:profile"));
+        defaults.put(RoleCode.INTERVIEWER, Set.of(
+                "menu:dashboard", "menu:assistant", "menu:knowledge", "menu:resume", "menu:jobs",
+                "menu:interviews", "menu:reports", "menu:profile"));
+        defaults.put(RoleCode.CANDIDATE, Set.of(
+                "menu:dashboard", "menu:assistant", "menu:resume", "menu:jobs",
+                "menu:interviews", "menu:reports", "menu:profile"));
         return defaults.entrySet().stream().collect(Collectors.toUnmodifiableMap(
                 Map.Entry::getKey, entry -> Set.copyOf(entry.getValue())));
     }
 
     private static Map<RoleCode, Map<String, Set<String>>> roleMenuOperations() {
         Map<RoleCode, Map<String, Set<String>>> mappings = new EnumMap<>(RoleCode.class);
-        mappings.put(RoleCode.COACH, roleOperations(
+        mappings.put(RoleCode.INTERVIEWER, roleOperations(
                 Map.entry("menu:assistant", Set.of("ai:chat", "ai:memory")),
-                Map.entry("menu:knowledge", Set.of("knowledge:read", "knowledge:write", "ocr:use")),
-                Map.entry("menu:courses", Set.of("course:read", "course:write", "booking:read", "booking:write")),
-                Map.entry("menu:training", Set.of(
-                        "exercise:read", "exercise:write", "video:read", "workout:read", "workout:write",
-                        "workout-record:read", "training:read", "nutrition:read", "nutrition:write",
-                        "ai:recommend"))));
-        mappings.put(RoleCode.MEMBER, roleOperations(
-                // 会员在 AI 中心可检索租户知识库（动作规范、安全提示等），不开放知识库管理菜单
-                Map.entry("menu:assistant", Set.of("ai:chat", "ai:memory", "ai:plan", "knowledge:read")),
-                Map.entry("menu:courses", Set.of("course:read", "booking:read", "booking:write")),
-                Map.entry("menu:training", Set.of(
-                        "exercise:read", "video:read", "workout:read", "workout-record:read",
-                        "workout:write", "workout-record:write", "training:read", "nutrition:read",
-                        "nutrition:write", "ai:recommend", "ai:plan")),
-                Map.entry("menu:profile", Set.of(
-                        "membership:change:request", "membership:change:read", "membership:change:cancel"))));
+                Map.entry("menu:knowledge", Set.of("knowledge:read", "ocr:use")),
+                Map.entry("menu:resume", Set.of("resume:read", "resume:analyze")),
+                Map.entry("menu:jobs", Set.of("job:read", "job:match")),
+                Map.entry("menu:interviews", Set.of("interview:start", "interview:read", "interview:answer")),
+                Map.entry("menu:reports", Set.of("report:read"))));
+        mappings.put(RoleCode.CANDIDATE, roleOperations(
+                // 求职者可在 AI 助手里检索公开知识库（技术题、岗位面经），但不含知识库管理
+                Map.entry("menu:assistant", Set.of("ai:chat", "ai:memory", "knowledge:read")),
+                Map.entry("menu:resume", Set.of("resume:read", "resume:write", "resume:analyze")),
+                Map.entry("menu:jobs", Set.of("job:read", "job:match")),
+                Map.entry("menu:interviews", Set.of("interview:start", "interview:read", "interview:answer")),
+                Map.entry("menu:reports", Set.of("report:read"))));
         return mappings.entrySet().stream().collect(Collectors.toUnmodifiableMap(
                 Map.Entry::getKey, entry -> entry.getValue().entrySet().stream()
                         .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, value -> Set.copyOf(value.getValue())))));

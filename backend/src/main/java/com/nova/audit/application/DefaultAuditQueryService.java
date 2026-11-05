@@ -30,7 +30,7 @@ public class DefaultAuditQueryService implements AuditQueryService {
     }
 
     private static void requireAuditReader(CurrentActor actor) {
-        if (actor == null || (!actor.isPlatformAdmin() && !actor.roles().contains(RoleCode.GYM_ADMIN))) {
+        if (actor == null || (!actor.isPlatformAdmin() && !actor.roles().contains(RoleCode.ADMIN))) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
     }

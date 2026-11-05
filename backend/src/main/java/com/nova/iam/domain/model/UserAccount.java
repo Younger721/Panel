@@ -94,7 +94,7 @@ public class UserAccount extends AuditableEntity {
     }
 
     public static UserAccount tenantUser(Long tenantId, String email, String passwordHash, String displayName) {
-        return tenantUser(tenantId, email, passwordHash, displayName, RoleCode.MEMBER);
+        return tenantUser(tenantId, email, passwordHash, displayName, RoleCode.CANDIDATE);
     }
 
     public static UserAccount tenantUser(Long tenantId, String email, String passwordHash, String displayName,

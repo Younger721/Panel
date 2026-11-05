@@ -45,9 +45,9 @@ public class DefaultTenantProvisioningService implements TenantProvisioningServi
                 ? UserAccount.defaultUsernameFromEmail(email)
                 : UserAccount.normalizeUsername(administrator.username());
         UserAccount user = userRepository.save(UserAccount.tenantUser(saved.getId(), email, username,
-                administrator.passwordHash(), administrator.displayName(), RoleCode.GYM_ADMIN));
-        Role gymAdminRole = roleRepository.findByCode(RoleCode.GYM_ADMIN)
-                .orElseThrow(() -> new IllegalStateException("GYM_ADMIN role is not initialized"));
+                administrator.passwordHash(), administrator.displayName(), RoleCode.ADMIN));
+        Role gymAdminRole = roleRepository.findByCode(RoleCode.ADMIN)
+                .orElseThrow(() -> new IllegalStateException("ADMIN role is not initialized"));
         userRoleRepository.save(UserRole.assign(user, gymAdminRole));
         contributors.forEach(contributor -> contributor.contribute(saved));
         return new ProvisionedTenant(saved, user);

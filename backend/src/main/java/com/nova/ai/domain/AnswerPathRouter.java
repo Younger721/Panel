@@ -37,7 +37,7 @@ public class AnswerPathRouter {
             return clamp(legacy, canRag, canTools);
         }
 
-        String roleCode = profile != null ? profile.roleCode() : RoleCode.MEMBER.name();
+        String roleCode = profile != null ? profile.roleCode() : RoleCode.CANDIDATE.name();
         var ruleHit = rules.match(roleCode, question, history);
         if (ruleHit.isPresent()) {
             return clamp(ruleHit.get(), canRag, canTools);
@@ -59,7 +59,7 @@ public class AnswerPathRouter {
     private AnswerPathPlan fallbackPlan(String roleCode, boolean canRag, boolean canTools,
                                         AiHarnessProperties properties) {
         boolean hybridOnAmbiguous = properties == null || properties.isHybridOnAmbiguous();
-        if (RoleCode.GYM_ADMIN.name().equals(roleCode) && hybridOnAmbiguous && canRag && canTools) {
+        if (RoleCode.ADMIN.name().equals(roleCode) && hybridOnAmbiguous && canRag && canTools) {
             return new AnswerPathPlan(AnswerPath.HYBRID, true, true, Set.of(),
                     "未命中明确规则，门店身份下同时开放知识库与业务工具", RouteConfidence.FALLBACK);
         }

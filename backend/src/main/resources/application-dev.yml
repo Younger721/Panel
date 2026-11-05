@@ -13,6 +13,13 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_HOST_PORT:6379}
+  kafka:
+    bootstrap-servers: ${NOVA_KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
   jpa:
     hibernate:
       ddl-auto: update
@@ -28,7 +35,11 @@ nova:
   environment: dev
   dev:
     reset-demo-password: ${NOVA_RESET_DEMO_PASSWORD:false}
-  job-queue: redis
+  job-queue: ${NOVA_JOB_QUEUE:redis}
+  kafka:
+    job-topic: ${NOVA_KAFKA_JOB_TOPIC:nova.async.job.ready}
+    dlq-topic: ${NOVA_KAFKA_DLQ_TOPIC:nova.async.job.dlq}
+    consumer-group: ${NOVA_KAFKA_CONSUMER_GROUP:nova-ingest-workers}
   object-store: minio
   object-store.minio-endpoint: ${NOVA_OBJECT_STORE_MINIO_ENDPOINT:http://localhost:9000}
   object-store.minio-access-key: ${NOVA_OBJECT_STORE_MINIO_ACCESS_KEY:minioadmin}

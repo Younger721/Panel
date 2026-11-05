@@ -2,16 +2,16 @@ package com.nova.platform.bootstrap;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.core.annotation.Order;
 
-/** Creates the local-MySQL queue table when the persistent queue is enabled. */
+/** Creates the local-MySQL queue table when a DB-backed persistent queue is enabled. */
 @Component
 @Profile("dev")
-@ConditionalOnProperty(name = "nova.job-queue", havingValue = "mysql")
+@ConditionalOnExpression("'${nova.job-queue:memory}' == 'mysql' or '${nova.job-queue:memory}' == 'kafka'")
 @Order(0)
 public class AsyncJobSchemaInitializer implements ApplicationRunner {
     private final JdbcTemplate jdbc;

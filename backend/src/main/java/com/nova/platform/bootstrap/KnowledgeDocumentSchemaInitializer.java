@@ -50,9 +50,9 @@ public class KnowledgeDocumentSchemaInitializer implements ApplicationRunner {
     private void backfillAudienceRoles() {
         try {
             jdbc.execute("INSERT IGNORE INTO knowledge_document_audience_role (document_id, role_code) SELECT id, 'PLATFORM_ADMIN' FROM knowledge_document WHERE tenant_id IS NULL");
-            jdbc.execute("INSERT IGNORE INTO knowledge_document_audience_role (document_id, role_code) SELECT id, 'GYM_ADMIN' FROM knowledge_document WHERE tenant_id IS NULL OR tenant_id IS NOT NULL");
-            jdbc.execute("INSERT IGNORE INTO knowledge_document_audience_role (document_id, role_code) SELECT id, 'COACH' FROM knowledge_document WHERE tenant_id IS NULL OR tenant_id IS NOT NULL");
-            jdbc.execute("INSERT IGNORE INTO knowledge_document_audience_role (document_id, role_code) SELECT id, 'MEMBER' FROM knowledge_document WHERE tenant_id IS NULL OR tenant_id IS NOT NULL");
+            jdbc.execute("INSERT IGNORE INTO knowledge_document_audience_role (document_id, role_code) SELECT id, 'ADMIN' FROM knowledge_document WHERE tenant_id IS NULL OR tenant_id IS NOT NULL");
+            jdbc.execute("INSERT IGNORE INTO knowledge_document_audience_role (document_id, role_code) SELECT id, 'INTERVIEWER' FROM knowledge_document WHERE tenant_id IS NULL OR tenant_id IS NOT NULL");
+            jdbc.execute("INSERT IGNORE INTO knowledge_document_audience_role (document_id, role_code) SELECT id, 'CANDIDATE' FROM knowledge_document WHERE tenant_id IS NULL OR tenant_id IS NOT NULL");
         } catch (DataAccessException ignored) {
             // Hibernate or a non-MySQL development database may create the table later.
         }

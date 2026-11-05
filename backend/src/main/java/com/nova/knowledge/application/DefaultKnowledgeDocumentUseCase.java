@@ -349,7 +349,7 @@ public class DefaultKnowledgeDocumentUseCase implements KnowledgeDocumentUseCase
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         ActorAccess.requireTenantId(actor);
-        if (!actor.roles().contains(RoleCode.GYM_ADMIN)) {
+        if (!actor.roles().contains(RoleCode.ADMIN)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
     }
@@ -424,8 +424,8 @@ public class DefaultKnowledgeDocumentUseCase implements KnowledgeDocumentUseCase
                                                        DocumentVisibility visibility,
                                                        List<RoleCode> requested) {
         Set<RoleCode> allowed = tenantId == null
-                ? Set.of(RoleCode.PLATFORM_ADMIN, RoleCode.GYM_ADMIN, RoleCode.COACH, RoleCode.MEMBER)
-                : Set.of(RoleCode.GYM_ADMIN, RoleCode.COACH, RoleCode.MEMBER);
+                ? Set.of(RoleCode.PLATFORM_ADMIN, RoleCode.ADMIN, RoleCode.INTERVIEWER, RoleCode.CANDIDATE)
+                : Set.of(RoleCode.ADMIN, RoleCode.INTERVIEWER, RoleCode.CANDIDATE);
         if (requested == null) {
             if (tenantId == null) return new LinkedHashSet<>(allowed);
             if (visibility == DocumentVisibility.PRIVATE_USER) {

@@ -35,7 +35,7 @@ public class KnowledgeEditorActorResolver {
             if (!roles.contains(RoleCode.PLATFORM_ADMIN)) {
                 throw new BusinessException(ErrorCode.FORBIDDEN);
             }
-        } else if (!roles.contains(RoleCode.GYM_ADMIN) && !roles.contains(RoleCode.PLATFORM_ADMIN)) {
+        } else if (!roles.contains(RoleCode.ADMIN) && !roles.contains(RoleCode.PLATFORM_ADMIN)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         Set<String> permissions = user.getTenantId() == null

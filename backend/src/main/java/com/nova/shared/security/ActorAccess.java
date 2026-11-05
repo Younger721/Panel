@@ -53,7 +53,7 @@ public final class ActorAccess {
             return;
         }
         if (actor.tenantId() == null
-                || !actor.roles().contains(RoleCode.GYM_ADMIN)) {
+                || !actor.roles().contains(RoleCode.ADMIN)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         if (!actor.hasPermission(permission)) {
@@ -72,7 +72,7 @@ public final class ActorAccess {
         }
         if (isSuperAdmin(actor)) throw new BusinessException(ErrorCode.FORBIDDEN);
         if (actor.tenantId() == null
-                || !actor.roles().contains(RoleCode.GYM_ADMIN)
+                || !actor.roles().contains(RoleCode.ADMIN)
                 || permission == null
                 || permission.isBlank()) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
@@ -83,7 +83,7 @@ public final class ActorAccess {
     }
 
     public static boolean canManageTenant(CurrentActor actor) {
-        return actor != null && (isSuperAdmin(actor) || actor.roles().contains(RoleCode.GYM_ADMIN));
+        return actor != null && (isSuperAdmin(actor) || actor.roles().contains(RoleCode.ADMIN));
     }
 
     public static void requirePlatformAdmin(CurrentActor actor, String permission) {
@@ -99,7 +99,7 @@ public final class ActorAccess {
         if (actor == null || isSuperAdmin(actor)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
-        if (actor.tenantId() == null || !actor.roles().contains(RoleCode.GYM_ADMIN)) {
+        if (actor.tenantId() == null || !actor.roles().contains(RoleCode.ADMIN)) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         if (permission == null || permission.isBlank() || !actor.hasPermission(permission)) {

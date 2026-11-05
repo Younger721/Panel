@@ -12,7 +12,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if not defined JAVA_HOME set "JAVA_HOME=D:\java\jdk-17.0.14"
+if not defined JAVA_HOME set "JAVA_HOME=D:\java\jdk-21"
 if not defined SPRING_PROFILES_ACTIVE set "SPRING_PROFILES_ACTIVE=dev"
 
 cd /d "%~dp0backend"

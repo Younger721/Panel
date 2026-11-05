@@ -54,7 +54,7 @@ public class DefaultAiUsageQueryService implements AiUsageQueryService {
     }
 
     private List<AiUsageRecord> scoped(CurrentActor actor) {
-        if (actor == null || (!actor.isPlatformAdmin() && !actor.roles().contains(RoleCode.GYM_ADMIN))) {
+        if (actor == null || (!actor.isPlatformAdmin() && !actor.roles().contains(RoleCode.ADMIN))) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         Long tenantId = ActorAccess.tenantId(actor);

@@ -40,7 +40,7 @@ public class PlatformTenantAdminService {
         requirePlatform(actor);
         requireTenant(tenantId);
         Page<UserAccount> page = users.findAllByTenantIdAndRoleCode(
-                tenantId, RoleCode.GYM_ADMIN, pageable == null ? Pageable.ofSize(20) : pageable);
+                tenantId, RoleCode.ADMIN, pageable == null ? Pageable.ofSize(20) : pageable);
         return new PageResponse<>(page.map(PlatformTenantAdminService::view).getContent(),
                 page.getNumber(), page.getSize(), page.getTotalElements(), page.getTotalPages());
     }
@@ -77,7 +77,7 @@ public class PlatformTenantAdminService {
         UserAccount user = users.findByTenantIdAndId(tenantId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
         Set<RoleCode> userRoles = roles.findRoleCodesByUserId(userId);
-        if (userRoles == null || !userRoles.equals(Set.of(RoleCode.GYM_ADMIN))) {
+        if (userRoles == null || !userRoles.equals(Set.of(RoleCode.ADMIN))) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         return user;

@@ -16,7 +16,7 @@ import java.time.Instant;
 import java.util.List;
 
 @Component
-public class KnowledgeIngestWorker {
+public class KnowledgeIngestWorker implements com.nova.shared.async.AsyncJobHandler {
 
     public static final String JOB_TYPE = "KNOWLEDGE_INGEST";
     public static final String JOB_TYPE_PARSE = "KNOWLEDGE_INGEST_PARSE";
@@ -95,30 +95,26 @@ public class KnowledgeIngestWorker {
         jobs.enqueue(JOB_TYPE_INDEX + ":" + documentId, tenantId);
     }
 
-    @Scheduled(fixedDelayString = "${nova.knowledge.ingest-delay-ms:5000}")
-    @Transactional
-    public void processNext() {
-        Instant now = clock.instant();
-        jobs.recoverExpired(now);
-        jobs.claimNext(now, jobProperties.leaseDuration()).ifPresent(job -> {
-            if (job.type() == null || !isIngestJob(job.type())) {
+    @Override
+    public boolean supports(String type) {
+        return type != null && isIngestJob(type);
+    }
+
+    @Override
+    public void handle(com.nova.shared.async.PersistentJob job, Instant now) {
+        try {
+            if (job.type().startsWith(JOB_TYPE_INDEX + ":")) {
+                processIndexJob(job, now);
+            } else if (job.type().startsWith(JOB_TYPE_PARSE + ":")) {
+                processParseJob(job, now);
+            } else if (job.type().startsWith(JOB_TYPE + ":")) {
+                processLegacyJob(job, now);
+            } else {
                 jobs.complete(job.id());
-                return;
             }
-            try {
-                if (job.type().startsWith(JOB_TYPE_INDEX + ":")) {
-                    processIndexJob(job, now);
-                } else if (job.type().startsWith(JOB_TYPE_PARSE + ":")) {
-                    processParseJob(job, now);
-                } else if (job.type().startsWith(JOB_TYPE + ":")) {
-                    processLegacyJob(job, now);
-                } else {
-                    jobs.complete(job.id());
-                }
-            } catch (RuntimeException ex) {
-                handleFailure(job, ex, now);
-            }
-        });
+        } catch (RuntimeException ex) {
+            handleFailure(job, ex, now);
+        }
     }
 
     private void processLegacyJob(com.nova.shared.async.PersistentJob job, Instant now) {

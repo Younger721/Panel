@@ -63,8 +63,8 @@ public class KnowledgeDocument {
         if ((tenantId != null && tenantId <= 0) || fileName == null || fileName.isBlank() || contentType == null || contentType.isBlank() || visibility == null || keySegment == null || keySegment.isBlank()) throw new IllegalArgumentException("invalid document");
         if (visibility == DocumentVisibility.PRIVATE_USER && (ownerUserId == null || ownerUserId <= 0)) throw new IllegalArgumentException("private document requires owner");
         this.tenantId=tenantId; this.ownerUserId=ownerUserId; this.fileName=safeFileName(fileName); this.contentType=contentType.trim(); this.visibility=visibility; this.audienceRoles = new LinkedHashSet<>(tenantId == null
-                ? Set.of(RoleCode.PLATFORM_ADMIN, RoleCode.GYM_ADMIN, RoleCode.COACH, RoleCode.MEMBER)
-                : Set.of(RoleCode.GYM_ADMIN, RoleCode.COACH, RoleCode.MEMBER)); this.objectKey=(tenantId == null ? "platform" : "tenant/%d".formatted(tenantId))+"/knowledge/%s/%s".formatted(keySegment.trim(), this.fileName); this.status=DocumentStatus.UPLOADING;
+                ? Set.of(RoleCode.PLATFORM_ADMIN, RoleCode.ADMIN, RoleCode.INTERVIEWER, RoleCode.CANDIDATE)
+                : Set.of(RoleCode.ADMIN, RoleCode.INTERVIEWER, RoleCode.CANDIDATE)); this.objectKey=(tenantId == null ? "platform" : "tenant/%d".formatted(tenantId))+"/knowledge/%s/%s".formatted(keySegment.trim(), this.fileName); this.status=DocumentStatus.UPLOADING;
     }
     public static KnowledgeDocument create(Long tenantId, Long ownerUserId, String fileName, String contentType, DocumentVisibility visibility, Long sequence) { return new KnowledgeDocument(tenantId,ownerUserId,fileName,contentType,visibility,sequence == null ? null : String.valueOf(sequence)); }
     public static KnowledgeDocument create(Long tenantId, Long ownerUserId, String fileName, String contentType, DocumentVisibility visibility, String keySegment) { return new KnowledgeDocument(tenantId,ownerUserId,fileName,contentType,visibility,keySegment); }
@@ -236,8 +236,8 @@ public class KnowledgeDocument {
     public Set<RoleCode> effectiveAudienceRoles(){
         if (audienceRoles != null && !audienceRoles.isEmpty()) return audienceRoles();
         return tenantId == null
-                ? Set.of(RoleCode.PLATFORM_ADMIN, RoleCode.GYM_ADMIN, RoleCode.COACH, RoleCode.MEMBER)
-                : Set.of(RoleCode.GYM_ADMIN, RoleCode.COACH, RoleCode.MEMBER);
+                ? Set.of(RoleCode.PLATFORM_ADMIN, RoleCode.ADMIN, RoleCode.INTERVIEWER, RoleCode.CANDIDATE)
+                : Set.of(RoleCode.ADMIN, RoleCode.INTERVIEWER, RoleCode.CANDIDATE);
     }
     public String chunkStrategy(){return chunkStrategy == null || chunkStrategy.isBlank() ? "GENERAL" : chunkStrategy;}
     public int chunkStrategyVersion(){return chunkStrategyVersion == null || chunkStrategyVersion <= 0 ? 1 : chunkStrategyVersion;}

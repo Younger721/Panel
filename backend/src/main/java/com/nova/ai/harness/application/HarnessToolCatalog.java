@@ -109,7 +109,7 @@ public class HarnessToolCatalog {
     /** 仅店长补齐门店运营工具；平台管理员保持平台 AI 问答 */
     public List<String> expandStoreOps(CurrentActor actor, List<String> enabled) {
         if (actor == null || actor.isPlatformAdmin()
-                || !actor.roles().contains(RoleCode.GYM_ADMIN)
+                || !actor.roles().contains(RoleCode.ADMIN)
                 || ActorAccess.tenantId(actor) == null) {
             return enabled;
         }

@@ -913,9 +913,9 @@ public class DefaultKnowledgeSearchService implements KnowledgeSearchService {
     private static String roleLabel(RoleCode role) {
         return switch (role) {
             case PLATFORM_ADMIN -> "平台管理员";
-            case GYM_ADMIN -> "健身房管理员";
-            case COACH -> "教练";
-            case MEMBER -> "会员";
+            case ADMIN -> "健身房管理员";
+            case INTERVIEWER -> "教练";
+            case CANDIDATE -> "会员";
         };
     }
 

@@ -66,7 +66,7 @@ public class DefaultUserInvitationService implements UserInvitationService {
         Long tenantId = requireGymAdmin(actor, "user:write");
         Objects.requireNonNull(command, "command");
         RoleCode role = command.role();
-        if (role != RoleCode.COACH && role != RoleCode.MEMBER) {
+        if (role != RoleCode.INTERVIEWER && role != RoleCode.CANDIDATE) {
             throw new BusinessException(ErrorCode.FORBIDDEN);
         }
         String email = UserAccount.normalizeEmail(command.email());

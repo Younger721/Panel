@@ -3,6 +3,11 @@ spring:
     name: nova-ai-backend
   profiles:
     default: dev
+  # 简历上传：默认 1MB 放不下带图的 PDF/DOCX
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
 server:
   port: ${SERVER_PORT:8080}
 management:
