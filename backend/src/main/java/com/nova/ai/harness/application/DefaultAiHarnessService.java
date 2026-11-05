@@ -1,0 +1,602 @@
+package com.nova.ai.harness.application;
+
+import com.nova.agent.domain.model.AgentStatus;
+import com.nova.agent.domain.model.TenantAgent;
+import com.nova.agent.domain.repository.TenantAgentRepository;
+import com.nova.ai.application.AiChatView;
+import com.nova.ai.application.KnowledgeAnswerFormatter;
+import com.nova.ai.application.AiUsageCommand;
+import com.nova.ai.application.ChatModelGateway;
+import com.nova.ai.application.DefaultAiUsageService;
+import com.nova.ai.domain.AnswerPath;
+import com.nova.ai.domain.AnswerPathPlan;
+import com.nova.ai.domain.AnswerPathRouter;
+import com.nova.ai.domain.ContextSegment;
+import com.nova.knowledge.application.KnowledgeSearchCitations;
+import com.nova.ai.domain.PromptInjectionGuard;
+import com.nova.ai.harness.AiHarnessPlugin;
+import com.nova.ai.harness.AiHarnessPluginDescriptor;
+import com.nova.ai.harness.AiHarnessPluginRegistry;
+import com.nova.ai.harness.AiProgressEvent;
+import com.nova.ai.harness.AiProgressDetail;
+import com.nova.ai.harness.HarnessPluginList;
+import com.nova.ai.harness.config.AiHarnessProperties;
+import com.nova.ai.harness.domain.PlatformHarnessConfig;
+import com.nova.ai.harness.domain.PlatformHarnessConfigRepository;
+import com.nova.ai.harness.capability.AiCapability;
+import com.nova.ai.harness.capability.AiCapabilityRegistry;
+import com.nova.ai.harness.capability.CapabilityDescriptor;
+import com.nova.ai.harness.capability.CapabilityOrigin;
+import com.nova.ai.harness.capability.ToolExecutionContext;
+import com.nova.ai.harness.capability.ToolResult;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.nova.ai.chat.application.AiChatHistoryService;
+import com.nova.ai.chat.application.AiPromptSkeleton;
+import com.nova.ai.chat.application.AiRoleProfile;
+import com.nova.ai.chat.application.AiRoleProfileResolver;
+import com.nova.ai.chat.domain.model.AiChatMessageRole;
+import com.nova.shared.error.BusinessException;
+import com.nova.shared.error.ErrorCode;
+import com.nova.shared.security.CurrentActor;
+import com.nova.shared.security.ActorAccess;
+import com.nova.tenancy.application.TenantQuotaService;
+import com.nova.tenancy.application.TenantQuotaServices;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Comparator;
+import java.util.UUID;
+import java.util.function.Consumer;
+
+@Service
+public class DefaultAiHarnessService implements AiHarnessService {
+
+    private final AiHarnessPluginRegistry registry;
+    private final PlatformHarnessConfigRepository platformConfigs;
+    private final AiHarnessProperties properties;
+    private final ChatModelGateway model;
+    private final DefaultAiUsageService usage;
+    private final TenantQuotaService quotas;
+    private final AiChatHistoryService chatHistory;
+    private final AiRoleProfileResolver roleProfiles;
+    private final AiCapabilityRegistry capabilityRegistry;
+    private final AiToolOrchestrator toolOrchestrator;
+    private final AnswerPathRouter answerPathRouter;
+    private final TenantAgentRepository tenantAgents;
+    private final PromptInjectionGuard guard = new PromptInjectionGuard();
+    /** 上下文编译：提示词拼装从对话主流程里拿出去，保证每段只出现一次 */
+    private final PromptComposer promptComposer = new PromptComposer();
+    /** 工具清单：平台配置 ∩ 角色模板，对话与配置视图共用一套计算 */
+    private final HarnessToolCatalog catalog;
+    /** 系统提示词分层：平台打底 → 角色规则 → 门店补充 → 安全红线 */
+    private final SystemPromptResolver promptResolver;
+    /** 上下文注入：知识库检索与旧插件贡献的片段 */
+    private final KnowledgeContextBuilder knowledgeBuilder;
+
+    public DefaultAiHarnessService(
+            AiHarnessPluginRegistry registry,
+            PlatformHarnessConfigRepository platformConfigs,
+            AiHarnessProperties properties,
+            ChatModelGateway model,
+            DefaultAiUsageService usage,
+            TenantQuotaService quotas) {
+        this(registry, platformConfigs, properties, model, usage, quotas, null, null, null, null, null, null);
+    }
+
+    /** Compatibility constructor used by focused tests and legacy integrations. */
+    public DefaultAiHarnessService(
+            AiHarnessPluginRegistry registry,
+            PlatformHarnessConfigRepository platformConfigs,
+            AiHarnessProperties properties,
+            ChatModelGateway model,
+            DefaultAiUsageService usage,
+            TenantQuotaService quotas,
+            TenantAgentRepository tenantAgents) {
+        this(registry, platformConfigs, properties, model, usage, quotas, tenantAgents, null, null, null, null, null);
+    }
+
+    /** Compatibility constructor used by focused tests and legacy integrations. */
+    public DefaultAiHarnessService(
+            AiHarnessPluginRegistry registry,
+            PlatformHarnessConfigRepository platformConfigs,
+            AiHarnessProperties properties,
+            ChatModelGateway model,
+            DefaultAiUsageService usage,
+            TenantQuotaService quotas,
+            TenantAgentRepository tenantAgents,
+            AiChatHistoryService chatHistory,
+            AiCapabilityRegistry capabilityRegistry,
+            AiToolOrchestrator toolOrchestrator) {
+        this(registry, platformConfigs, properties, model, usage, quotas, tenantAgents, chatHistory,
+                null, capabilityRegistry, toolOrchestrator, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DefaultAiHarnessService(
+            AiHarnessPluginRegistry registry,
+            PlatformHarnessConfigRepository platformConfigs,
+            AiHarnessProperties properties,
+            ChatModelGateway model,
+            DefaultAiUsageService usage,
+            TenantQuotaService quotas,
+            TenantAgentRepository tenantAgents,
+            AiChatHistoryService chatHistory,
+            AiRoleProfileResolver roleProfiles,
+            AiCapabilityRegistry capabilityRegistry,
+            AiToolOrchestrator toolOrchestrator,
+            AnswerPathRouter answerPathRouter) {
+        this.registry = registry;
+        this.platformConfigs = platformConfigs;
+        this.properties = properties;
+        this.model = model;
+        this.usage = usage;
+        this.quotas = quotas == null ? TenantQuotaServices.unboundedForLegacyConstruction() : quotas;
+        this.chatHistory = chatHistory;
+        this.roleProfiles = roleProfiles == null ? new AiRoleProfileResolver() : roleProfiles;
+        this.capabilityRegistry = capabilityRegistry;
+        this.toolOrchestrator = toolOrchestrator;
+        this.answerPathRouter = answerPathRouter == null
+                ? new AnswerPathRouter(new com.nova.ai.domain.AnswerPathRuleEngine(), capabilityRegistry)
+                : answerPathRouter;
+        this.tenantAgents = tenantAgents;
+        this.catalog = new HarnessToolCatalog(registry, capabilityRegistry, platformConfigs, properties);
+        this.promptResolver = new SystemPromptResolver(catalog, tenantAgents);
+        this.knowledgeBuilder = new KnowledgeContextBuilder(registry);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public HarnessConfigView getConfig(CurrentActor actor) {
+        if (actor == null) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (actor.isPlatformAdmin()) {
+            return buildPlatformView(actor);
+        }
+        requireTenantRead(actor);
+        // 门店侧只读返回"当前角色可用能力"，不回传任何系统提示词：
+        // 提示词由平台底座 + 门店补充两层构成，门店只维护自己那一层（见 Agent 配置）。
+        AiRoleProfile profile = roleProfiles.resolve(actor);
+        // 门店实际可用的工具 = 平台已启用 ∩ 角色模板，远端的另算；门店自己改不了
+        return new HarnessConfigView(
+                catalog.tenantViewFor(actor, profile),
+                registry.listFor(actor),
+                "",
+                false,
+                catalog.visible(actor));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public HarnessConfigView getPlatformConfig(CurrentActor actor) {
+        return buildPlatformView(requirePlatform(actor, "platform:tenant:read"));
+    }
+
+    @Override
+    @Transactional
+    public HarnessConfigView updatePlatformConfig(CurrentActor actor, UpdateHarnessConfigCommand command) {
+        requirePlatform(actor, "platform:tenant:write");
+        validateCommand(command);
+        PlatformHarnessConfig config = catalog.platformConfig();
+        List<String> enabled = catalog.sanitize(actor, command.enabledPlugins());
+        config.update(HarnessPluginList.join(enabled), normalizePrompt(command.systemPrompt()));
+        platformConfigs.save(config);
+        return buildPlatformView(actor);
+    }
+
+    @Override
+    @Transactional
+    public AiChatView chat(CurrentActor actor, String sessionId, String question, List<String> sessionPlugins) {
+        return chat(actor, sessionId, question, sessionPlugins, ignored -> { });
+    }
+
+    @Override
+    public AiChatView chat(CurrentActor actor, String sessionId, String question, List<String> sessionPlugins,
+                           Consumer<String> onToken) {
+        return chat(actor, sessionId, question, sessionPlugins, List.of(), onToken);
+    }
+
+    @Override
+    public AiChatView chat(CurrentActor actor, String sessionId, String question, List<String> sessionPlugins,
+                           List<AiChatTurn> history, Consumer<String> onToken) {
+        return chat(actor, sessionId, question, sessionPlugins, history, onToken, ignored -> { });
+    }
+
+    @Override
+    public AiChatView chat(CurrentActor actor, String sessionId, String question, List<String> sessionPlugins,
+                           List<AiChatTurn> history, Consumer<String> onToken,
+                           Consumer<AiProgressEvent> onProgress) {
+        // 1. 准备：身份、配额、角色、工具清单、提示词分层、会话历史
+        PreparedConversation prepared = prepare(actor, sessionId, question, sessionPlugins, history);
+        Consumer<AiProgressEvent> progress = onProgress == null ? ignored -> { } : onProgress;
+        AiRoleProfile profile = prepared.profile();
+        List<String> enabled = prepared.enabled();
+        String basePrompt = prepared.basePrompt();
+        String tenantContextNote = prepared.tenantContextNote();
+        history = prepared.history();
+        Long effectiveTenantId = ActorAccess.tenantId(actor);
+        AnswerPathPlan pathPlan = answerPathRouter.resolve(actor, profile, question, history, enabled, properties);
+        String routeMessage = pathPlan.routeReason();
+        if (actor.isPlatformAdmin() && effectiveTenantId != null) {
+            routeMessage += "（顶栏门店租户 ID=" + effectiveTenantId + "）";
+        }
+        progress.accept(new AiProgressEvent("answer_router", "route_decision", AiProgressEvent.Status.COMPLETED,
+                routeMessage, null));
+        List<ContextSegment> context = new ArrayList<>();
+        List<ContextSegment> retrievedKnowledge = List.of();
+        boolean knowledgeRetrieved = false;
+        if (pathPlan.runKnowledgeSearch()) {
+            retrievedKnowledge = knowledgeBuilder.retrieve(actor, question, context, progress);
+            knowledgeRetrieved = true;
+        }
+        String authoritativeAnswer = context.stream().filter(ContextSegment::authoritativeAnswer)
+                .map(ContextSegment::text).filter(Objects::nonNull).findFirst().orElse(null);
+        boolean nativeToolFlow = authoritativeAnswer == null
+                && pathPlan.runToolOrchestration()
+                && model.supportsToolCalling() && toolOrchestrator != null;
+        if (!nativeToolFlow && authoritativeAnswer == null && pathPlan.runToolOrchestration()) {
+            // 非原生工具流时由旧插件补数据；知识库已检索的插件不重复贡献
+            knowledgeBuilder.contributePlugins(actor, question, enabled, context, knowledgeRetrieved, progress);
+        }
+
+        long started = System.currentTimeMillis();
+        if (!nativeToolFlow && context.isEmpty() && pathPlan.path() == AnswerPath.KNOWLEDGE_ONLY
+                && pathPlan.runKnowledgeSearch()
+                && properties.getEmptyKnowledgePolicy() == AiHarnessProperties.EmptyKnowledgePolicy.REFUSE) {
+            recordUsage(actor, started, "NO_CONTEXT");
+            return new AiChatView("没有找到足够可靠的知识依据，暂不提供确定性建议。", List.of(), List.of());
+        }
+
+        boolean knowledgeUsed = !retrievedKnowledge.isEmpty();
+        boolean discloseMissingKnowledge = pathPlan.path() == AnswerPath.KNOWLEDGE_ONLY
+                && pathPlan.runKnowledgeSearch()
+                && !knowledgeUsed
+                && properties.getEmptyKnowledgePolicy() == AiHarnessProperties.EmptyKnowledgePolicy.DISCLOSE;
+        String answerRules = buildAnswerRules(pathPlan, enabled, knowledgeUsed, knowledgeRetrieved,
+                discloseMissingKnowledge);
+        String prompt = promptComposer.compose(new PromptComposer.Parts(
+                basePrompt, tenantContextNote, enabled, answerRules, history, question));
+        AiToolOrchestrationResult orchestration = null;
+        boolean directToolAnswerUsageRecorded = false;
+        if (nativeToolFlow && pathPlan.path() == AnswerPath.TOOLS_ONLY) {
+            ensurePreferredToolResults(actor, question, pathPlan, context, enabled, progress);
+        }
+        if (nativeToolFlow && pathPlan.path() == AnswerPath.TOOLS_ONLY
+                && context.stream().anyMatch(item -> "TOOL_RESULT".equals(item.documentId()))) {
+            prompt += toolResultPromptSuffix(context);
+            nativeToolFlow = false;
+        } else if (nativeToolFlow) {
+            orchestration = toolOrchestrator.decide(actor, prompt, context, enabled, pathPlan.preferredToolIds(), progress);
+            if (orchestration != null && orchestration.usage() != null && usage != null) {
+                directToolAnswerUsageRecorded = orchestration.directAnswer() != null;
+                try {
+                    usage.record(actor, new com.nova.ai.application.ChatModelCallResult(
+                            orchestration.directAnswer(), orchestration.usage(), orchestration.latencyMs(), "OK"),
+                            "tool-decision");
+                } catch (RuntimeException ignored) {
+                    // Usage persistence must not replace an AI result.
+                }
+            }
+            if (orchestration != null) {
+                context.addAll(orchestration.context());
+            }
+            if (pathPlan.path() != AnswerPath.TOOLS_ONLY) {
+                ensurePreferredToolResults(actor, question, pathPlan, context, enabled, progress);
+            }
+            prompt += toolResultPromptSuffix(context);
+        }
+        com.nova.ai.application.ChatModelCallResult call;
+        progress.accept(new AiProgressEvent("answer_generator", "answer_generation", AiProgressEvent.Status.STARTED,
+                "\u6b63\u5728\u751f\u6210\u56de\u7b54", null));
+        if (authoritativeAnswer != null) {
+            String directAnswer = emitAnswer(authoritativeAnswer, onToken);
+            call = com.nova.ai.application.ChatModelCallResult.unavailable(directAnswer,
+                    Math.max(0, System.currentTimeMillis() - started), "OK");
+        } else if (nativeToolFlow && orchestration != null && orchestration.directAnswer() != null
+                && pathPlan.path() != AnswerPath.TOOLS_ONLY) {
+            String directAnswer = emitAnswer(orchestration.directAnswer(), onToken);
+            call = com.nova.ai.application.ChatModelCallResult.unavailable(directAnswer,
+                    Math.max(0, System.currentTimeMillis() - started), "OK");
+        } else {
+            call = model.streamWithUsage(prompt, context, onToken);
+            if (call == null) {
+                call = com.nova.ai.application.ChatModelCallResult.unavailable(
+                        model.stream(prompt, context, onToken), Math.max(0, System.currentTimeMillis() - started), "OK");
+            }
+        }
+        if (call == null || !"OK".equalsIgnoreCase(call.status())) {
+            progress.accept(new AiProgressEvent("answer_generator", "answer_generation", AiProgressEvent.Status.FAILED,
+                    "\u56de\u7b54\u751f\u6210\u5931\u8d25", null));
+            if (call != null) {
+                recordUsage(actor, call, "harness");
+            } else {
+                recordUsage(actor, started, "ERROR");
+            }
+            throw new BusinessException(ErrorCode.DEPENDENCY_UNAVAILABLE);
+        }
+        String answer = call.content();
+        if (answer == null || answer.isBlank()) {
+            progress.accept(new AiProgressEvent("answer_generator", "answer_generation", AiProgressEvent.Status.FAILED,
+                    "\u56de\u7b54\u751f\u6210\u5931\u8d25", null));
+            recordUsage(actor, started, "EMPTY_RESPONSE");
+            throw new BusinessException(ErrorCode.DEPENDENCY_UNAVAILABLE);
+        }
+        progress.accept(new AiProgressEvent("answer_generator", "answer_generation", AiProgressEvent.Status.COMPLETED,
+                "\u56de\u7b54\u751f\u6210\u5b8c\u6210", null));
+        if (chatHistory != null) {
+            chatHistory.append(actor, sessionId, AiChatMessageRole.ASSISTANT, answer);
+        }
+        if (!directToolAnswerUsageRecorded) {
+            recordUsage(actor, call, "harness");
+        }
+
+        var sources = knowledgeUsed ? KnowledgeSearchCitations.chunkIdsInOrder(retrievedKnowledge) : List.<String>of();
+        var citations = knowledgeUsed
+                ? KnowledgeSearchCitations.toCitations(retrievedKnowledge, question)
+                : List.<com.nova.ai.application.SourceCitation>of();
+        if (knowledgeUsed && !citations.isEmpty()) {
+            answer = KnowledgeAnswerFormatter.apply(answer, citations);
+        }
+        answer = normalizeHarnessAnswer(answer, knowledgeUsed, discloseMissingKnowledge);
+        return new AiChatView(answer, sources, citations);
+    }
+
+    private static String emitAnswer(String answer, Consumer<String> onToken) {
+        String value = answer == null ? "" : answer;
+        if (onToken != null) {
+            for (int i = 0; i < value.length(); i += 12) {
+                onToken.accept(value.substring(i, Math.min(value.length(), i + 12)));
+            }
+        }
+        return value;
+    }
+
+    private void ensurePreferredToolResults(CurrentActor actor, String question, AnswerPathPlan pathPlan,
+                                            List<ContextSegment> context, List<String> enabled,
+                                            Consumer<AiProgressEvent> progress) {
+        if (capabilityRegistry == null || pathPlan.path() != AnswerPath.TOOLS_ONLY
+                || pathPlan.preferredToolIds().isEmpty()) {
+            return;
+        }
+        if (context.stream().anyMatch(item -> "TOOL_RESULT".equals(item.documentId()))) {
+            return;
+        }
+        for (String toolId : pathPlan.preferredToolIds()) {
+            capabilityRegistry.find(toolId).ifPresent(capability -> {
+                if (capability.supports(actor)) {
+                    executeReadTool(actor, question, capability, context, progress);
+                }
+            });
+        }
+    }
+
+    /** 一次对话的准备结果；后续步骤只读它，不再各自回查配置 */
+    private record PreparedConversation(AiRoleProfile profile, List<String> enabled, String basePrompt,
+                                        String tenantContextNote, List<AiChatTurn> history) {
+    }
+
+    /**
+     * 准备阶段：校验 → 配额 → 角色模板 → 工具清单 → 提示词分层 → 会话历史。
+     */
+    private PreparedConversation prepare(CurrentActor actor, String sessionId, String question,
+                                         List<String> sessionPlugins, List<AiChatTurn> history) {
+        if (sessionId == null || sessionId.isBlank() || question == null || question.isBlank()
+                || guard.isBlocked(question)) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        if (!canChat(actor)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        Long tenantId = ActorAccess.tenantId(actor);
+        if (actor.isPlatformAdmin()) {
+            quotas.ensureAiChatAllowed(actor);
+        } else if (tenantId != null) {
+            quotas.ensureAiChatAllowed(tenantId);
+        }
+
+        AiRoleProfile profile = roleProfiles.resolve(actor);
+        List<String> enabled = catalog.enabledFor(actor, sessionPlugins, profile);
+        enabled = HarnessPluginList.intersect(enabled, profile.enabledPlugins());
+        if (model.supportsToolCalling() && toolOrchestrator != null) {
+            // 只关 RAG 时，角色上的业务查询仍然可用，不跟插件开关走。
+            List<String> capabilityDefaults = new ArrayList<>(enabled);
+            capabilityDefaults.addAll(profile.enabledPlugins().stream()
+                    .filter(id -> !"basic_chat".equals(id) && !"knowledge_search".equals(id))
+                    .toList());
+            enabled = HarnessPluginList.intersect(new LinkedHashSet<>(capabilityDefaults).stream().toList(),
+                    profile.enabledPlugins());
+        }
+        enabled = catalog.expandStoreOps(actor, enabled);
+        if (enabled.isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+
+        // 平台底座 + 角色规则 + 门店补充 + 安全红线，顺序由 AiPromptSkeleton 固定
+        String basePrompt = promptResolver.resolve(actor, profile);
+        String tenantContextNote = null;
+        Long effectiveTenantId = ActorAccess.tenantId(actor);
+        if (actor.isPlatformAdmin() && effectiveTenantId != null) {
+            tenantContextNote = "【当前门店上下文】平台顶栏已选择租户 ID=" + effectiveTenantId
+                    + "。该门店的 AI 配额、启用状态和本月用量用 platform_ai_admin_metrics 查询，"
+                    + "不要改用门店运营或会员流失工具，也不要让用户再填一遍门店。";
+        }
+        if (chatHistory != null) {
+            chatHistory.ensureSession(actor, sessionId, question);
+            chatHistory.append(actor, sessionId, AiChatMessageRole.USER, question);
+            history = chatHistory.messages(actor, sessionId).stream()
+                    .map(m -> new AiChatTurn(m.getRole() == AiChatMessageRole.USER ? "user" : "assistant", m.getContent()))
+                    .toList();
+        }
+        return new PreparedConversation(profile, enabled, basePrompt, tenantContextNote, history);
+    }
+
+    private void executeReadTool(CurrentActor actor, String question, AiCapability capability,
+                                 List<ContextSegment> context, Consumer<AiProgressEvent> progress) {
+        if (toolOrchestrator == null) {
+            throw new IllegalStateException("缺少工具编排器，无法预取工具结果");
+        }
+        // 统一走网关：身份、只读、参数校验与审计只在一处做
+        toolOrchestrator.executePreferredTool(actor, question, capability, context, progress);
+    }
+
+    private static String toolResultPromptSuffix(List<ContextSegment> context) {
+        String toolText = context.stream()
+                .filter(item -> "TOOL_RESULT".equals(item.documentId()) || "TOOL_ERROR".equals(item.documentId()))
+                .map(ContextSegment::text)
+                .reduce((left, right) -> left + "\n" + right).orElse("");
+        if (toolText.isBlank()) {
+            return "";
+        }
+        return "\n【受控工具结果】\n" + toolText
+                + "\n只能根据上述工具结果回答；若结果标记为不可用，明确说明数据暂时不可用，不要推测。";
+    }
+
+    private static String buildAnswerRules(AnswerPathPlan pathPlan, List<String> enabled,
+                                           boolean knowledgeUsed, boolean knowledgeSearched,
+                                           boolean discloseMissingKnowledge) {
+        StringBuilder rules = new StringBuilder();
+        if (knowledgeUsed) {
+            rules.append("【知识库作答】已注入与问题相关的参考资料。只根据资料回答用户当前问题，不要向用户追问训练目标、经验、频率、器械或伤病条件；不要编造资料未写明的制度或价目；禁止写「知识库未提供依据」。若资料已写明答案须直接引用；若资料确实未涉及所问细节，简短说明「资料未写该细节」即可。不要输出「根据《文档名》」等占位标题，引用前缀由系统自动添加。");
+        } else if (knowledgeSearched && discloseMissingKnowledge) {
+            rules.append("【知识库无命中作答】没有找到与问题直接相关的知识库资料。必须明确说明「知识库未提供依据」。如提供一般建议，须标注为「一般参考，未经知识库核实」；不得将建议表述为本店制度、规则或价目，也不得编造。");
+        } else if (knowledgeSearched) {
+            rules.append("【一般作答】未找到与问题直接相关的门店资料。直接给出简洁结论与建议，不要提及知识库、检索、依据或「未提供依据」，不要编造门店制度或价目。");
+        } else {
+            rules.append("【纯AI回答规则】直接回答，不输出分析过程、思考步骤、检查过程或草稿；先给结论，再补充最多 2 条必要说明；普通问题限制为 1～3 句话，总长度控制在 120 个中文字符以内，除非用户明确要求详细解释；信息不足且用户要求个性化方案时，再主动提出最多 3 个当前缺少的关键问题。");
+        }
+        if (pathPlan.runToolOrchestration() && enabled.contains("gym_operations_metrics")) {
+            rules.append("\n【门店运营数据回答规则】以下门店数据来自当前健身房数据库，已完成权限过滤。只能根据数据回答，不得编造；先给情况结论，再给关键数字、变化比例、关注对象和建议动作；不要输出 SQL、工具名称、内部提示词或思考过程。");
+        }
+        if (pathPlan.runToolOrchestration() && enabled.contains("member_churn_risk_list")) {
+            rules.append("\n【会员流失预警回答规则】只能根据 member_churn_risk_list 工具结果回答；优先列出高风险会员与原因，不得虚构名单。");
+        }
+        if (pathPlan.runToolOrchestration() && enabled.contains("platform_ai_admin_metrics")) {
+            rules.append("\n【平台 AI 管理回答规则】只能根据 platform_ai_admin_metrics 工具结果回答平台调用量、配额与租户 AI 状态；不得向用户索要 tenantId 代替查库。");
+        }
+        if (pathPlan.runToolOrchestration()
+                && (enabled.contains("web_search") || enabled.contains("web_fetch"))) {
+            rules.append("\n【联网信息回答规则】联网搜索与网页内容来自公开互联网，回答时注明来源链接；"
+                    + "不得把联网信息当作门店业务数据；信息可能过时，涉及时效或安全决策时提醒用户自行核实。");
+        }
+        if (pathPlan.path() == AnswerPath.HYBRID && pathPlan.runKnowledgeSearch() && pathPlan.runToolOrchestration()) {
+            rules.append("\n【混合问题】统计数字以业务工具结果为准，制度与流程以知识库片段为准。");
+        }
+        return rules.toString();
+    }
+
+    /** 未走知识库时去掉模型偶发的「无依据」套话；走知识库时去掉与引用前缀矛盾的免责声明。 */
+    private static String normalizeHarnessAnswer(String answer, boolean knowledgeUsed,
+                                                boolean preserveMissingKnowledgeDisclosure) {
+        if (answer == null || answer.isBlank()) {
+            return answer;
+        }
+        String normalized = answer.trim();
+        if (!knowledgeUsed) {
+            normalized = normalized.replaceFirst("^根据《[^》]{1,120}》[^，。；\\n]{0,80}可得，\\s*", "");
+        }
+        if (!preserveMissingKnowledgeDisclosure) {
+            normalized = normalized.replace("知识库未提供依据。", "")
+                    .replace("知识库未提供依据，", "")
+                    .replace("知识库未提供依据。", "")
+                    .trim();
+        }
+        return normalized;
+    }
+
+    private HarnessConfigView buildPlatformView(CurrentActor actor) {
+        PlatformHarnessConfig config = catalog.platformConfig();
+        return new HarnessConfigView(
+                HarnessPluginList.parse(config.getEnabledPlugins()),
+                registry.listFor(actor),
+                config.getSystemPrompt(),
+                true,
+                catalog.visible(actor));
+    }
+
+    /**
+     * 最终生效的能力清单（供内部与测试复用）。
+     *
+     * <p>规则：工具配置只属于平台管理员。门店传进来的 {@code sessionPlugins} 不参与计算，
+     * 门店侧能力完全由角色模板与平台登记决定，门店只能改提示词。</p>
+     */
+    List<String> effectivePlugins(CurrentActor actor, List<String> sessionPlugins, AiRoleProfile profile) {
+        return catalog.enabledFor(actor, sessionPlugins, profile);
+    }
+
+    private static boolean canChat(CurrentActor actor) {
+        if (actor == null) {
+            return false;
+        }
+        if (actor.isPlatformAdmin() && ActorAccess.tenantId(actor) == null) {
+            return true;
+        }
+        return ActorAccess.tenantId(actor) != null
+                && (actor.hasPermission("ai:chat") || actor.hasPermission("agent:chat"));
+    }
+
+    private static void validateCommand(UpdateHarnessConfigCommand command) {
+        if (command == null || command.systemPrompt() == null || command.systemPrompt().isBlank()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+    }
+
+    private static String normalizePrompt(String prompt) {
+        return prompt.trim();
+    }
+
+    private static void requireTenant(CurrentActor actor, String permission) {
+        if (ActorAccess.tenantId(actor) == null || !actor.hasPermission(permission)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+    }
+
+    private static void requireTenantRead(CurrentActor actor) {
+        if (ActorAccess.tenantId(actor) == null) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (actor.hasPermission("tenant:settings:read")
+                || actor.hasPermission("ai:chat")
+                || actor.hasPermission("agent:chat")) {
+            return;
+        }
+        throw new BusinessException(ErrorCode.FORBIDDEN);
+    }
+
+    private static CurrentActor requirePlatform(CurrentActor actor, String permission) {
+        if (actor == null || !actor.isPlatformAdmin() || !actor.hasPermission(permission)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        return actor;
+    }
+
+    private void recordUsage(CurrentActor actor, long started, String status) {
+        if (usage == null || (!actor.isPlatformAdmin() && ActorAccess.tenantId(actor) == null)) {
+            return;
+        }
+        try {
+            usage.record(actor, new AiUsageCommand(
+                    "harness",
+                    0,
+                    0,
+                    Math.max(0, System.currentTimeMillis() - started),
+                    "harness",
+                    status,
+                    null));
+        } catch (RuntimeException ignored) {
+            // 用量记录失败不影响对话
+        }
+    }
+
+    private void recordUsage(CurrentActor actor, com.nova.ai.application.ChatModelCallResult result, String feature) {
+        if (usage == null || (!actor.isPlatformAdmin() && ActorAccess.tenantId(actor) == null)) return;
+        try {
+            usage.record(actor, result, feature);
+        } catch (RuntimeException ignored) {
+            // Usage persistence must not replace an AI result.
+        }
+    }
+}

@@ -1,0 +1,26 @@
+package com.nova.iam.infrastructure.persistence;
+
+import com.nova.iam.domain.model.RolePermission;
+import com.nova.iam.domain.repository.RolePermissionRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+class JpaRolePermissionRepository implements RolePermissionRepository {
+    private final SpringDataRolePermissionRepository delegate;
+
+    JpaRolePermissionRepository(SpringDataRolePermissionRepository delegate) {
+        this.delegate = delegate;
+    }
+
+    @Override
+    public RolePermission save(RolePermission link) {
+        return delegate.save(link);
+    }
+
+    @Override
+    public boolean exists(Long roleId, Long permissionId) {
+        return delegate.existsById_RoleIdAndId_PermissionId(roleId, permissionId);
+    }
+    public java.util.Set<String> findPermissionCodesByRoleId(Long roleId) { return delegate.findPermissionCodesByRoleId(roleId); }
+    public void deleteByRoleId(Long roleId) { delegate.deleteById_RoleId(roleId); }
+}

@@ -1,0 +1,109 @@
+package com.nova.shared.security;
+
+import com.nova.iam.domain.model.RoleCode;
+import com.nova.shared.error.BusinessException;
+import com.nova.shared.error.ErrorCode;
+
+/**
+ * 统一鉴权入口：平台管理员白名单 + 租户上下文解析。
+ */
+public final class ActorAccess {
+
+    private ActorAccess() {}
+
+    /** 平台管理员拥有全部权限（白名单） */
+    public static boolean isSuperAdmin(CurrentActor actor) {
+        return actor != null && actor.isPlatformAdmin();
+    }
+
+    /** 解析有效租户 ID：租户用户取自身 tenantId，平台管理员取请求上下文 */
+    public static Long tenantId(CurrentActor actor) {
+        if (actor == null) {
+            return null;
+        }
+        if (actor.tenantId() != null) {
+            return actor.tenantId();
+        }
+        if (isSuperAdmin(actor)) {
+            return TenantContextHolder.get();
+        }
+        return null;
+    }
+
+    public static Long requireTenantId(CurrentActor actor) {
+        Long tenantId = tenantId(actor);
+        if (tenantId == null) {
+            throw new BusinessException(ErrorCode.TENANT_CONTEXT_REQUIRED);
+        }
+        return tenantId;
+    }
+
+    public static void requireGymAdmin(CurrentActor actor, String permission) {
+        if (actor == null) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (permission == null || permission.isBlank()) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (isSuperAdmin(actor)) {
+            requireTenantId(actor);
+            if (!permission.endsWith(":read")) {
+                throw new BusinessException(ErrorCode.FORBIDDEN);
+            }
+            return;
+        }
+        if (actor.tenantId() == null
+                || !actor.roles().contains(RoleCode.GYM_ADMIN)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (!actor.hasPermission(permission)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+    }
+
+    /**
+     * Checks a sensitive tenant operation against the permissions explicitly
+     * assigned to the actor. Role-wide administrator defaults do not satisfy
+     * this stricter check.
+     */
+    public static void requireExplicitGymAdmin(CurrentActor actor, String permission) {
+        if (actor == null) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (isSuperAdmin(actor)) throw new BusinessException(ErrorCode.FORBIDDEN);
+        if (actor.tenantId() == null
+                || !actor.roles().contains(RoleCode.GYM_ADMIN)
+                || permission == null
+                || permission.isBlank()) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (!actor.hasPermission(permission)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+    }
+
+    public static boolean canManageTenant(CurrentActor actor) {
+        return actor != null && (isSuperAdmin(actor) || actor.roles().contains(RoleCode.GYM_ADMIN));
+    }
+
+    public static void requirePlatformAdmin(CurrentActor actor, String permission) {
+        if (actor == null || !isSuperAdmin(actor)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+    }
+
+    /**
+     * 会籍变更审批：仅健身房管理员，平台管理员不可代审。
+     */
+    public static void requireGymAdminApproval(CurrentActor actor, String permission) {
+        if (actor == null || isSuperAdmin(actor)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (actor.tenantId() == null || !actor.roles().contains(RoleCode.GYM_ADMIN)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        if (permission == null || permission.isBlank() || !actor.hasPermission(permission)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+    }
+}

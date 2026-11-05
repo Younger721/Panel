@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: nova-ai-backend
+  profiles:
+    default: dev
+server:
+  port: ${SERVER_PORT:8080}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# 平台管理员引导账号（首次启动写入，登录后请立即改密）
+platform-admin:
+  email: ${PLATFORM_ADMIN_EMAIL:}
+  username: ${PLATFORM_ADMIN_USERNAME:}
+  password: ${PLATFORM_ADMIN_PASSWORD:}
+
+nova:
+  environment: ${NOVA_ENV:dev}
+
+  # ---------------- RAG 检索超参（沿用 GymMind 调优结果） ----------------
+  search:
+    recover-published: false
+    recover-incomplete-ingest: true
+    recover-index-on-start: false
+    require-dual-recall: false
+    recall-top-k: 30
+    fusion-top-k: 20
+    max-segments-per-document: 3
+    context-budget-chars: 12000
+    query-embedding-cache:
+      enabled: true
+      ttl-seconds: 300
+      max-entries: 512
+    rerank:
+      max-attempts: 2
+      retry-base-ms: 200
+    lexical:
+      long-query-term-threshold: 2
+      long-query-min-score: 4
+      very-long-query-term-threshold: 6
+      very-long-query-min-matches: 4
+
+  ai:
+    # 阿里百炼（DashScope）OpenAI 兼容接口
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:}
+      base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      chat-model: ${DASHSCOPE_CHAT_MODEL:qwen3.8-flash}
+      embedding-model: ${DASHSCOPE_EMBEDDING_MODEL:qwen3.7-text-embedding-flash}
+      rerank-model: ${DASHSCOPE_RERANK_MODEL:qwen3.7-text-rerank}
+      # 扫描件简历 OCR：主模型 + 免费额度用尽时的备用模型
+      ocr-model: ${DASHSCOPE_OCR_MODEL:qwen3.5-ocr}
+      ocr-fallback-model: ${DASHSCOPE_OCR_FALLBACK_MODEL:qwen3.8-flash}
+
+    # 联网搜索：面试场景默认关闭，避免引入不可控信息
+    web-search:
+      provider: ${AI_WEB_SEARCH_PROVIDER:none}
+      api-key: ${AI_WEB_SEARCH_API_KEY:}
+      max-results: ${AI_WEB_SEARCH_MAX_RESULTS:5}
+      timeout-ms: ${AI_WEB_SEARCH_TIMEOUT_MS:8000}
+      max-content-chars: ${AI_WEB_SEARCH_MAX_CONTENT_CHARS:6000}
+      max-download-bytes: ${AI_WEB_SEARCH_MAX_DOWNLOAD_BYTES:524288}
+
+    # 对话编排：默认只开基础对话 + 知识库检索 + 记忆
+    harness:
+      routing-mode: AUTO
+      empty-knowledge-policy: DISCLOSE
+      platform-default-plugins: basic_chat,knowledge_search,ai_memory
+      default-system-prompt: 你是 Nova AI 面试助手，基于候选人的简历与目标岗位提问和评分，回答要专业、具体、可追溯，不得编造简历中不存在的内容。
+
+  security:
+    jwt:
+      issuer: Nova
+      # 至少 32 字节，生产环境务必用环境变量覆盖
+      secret: ${JWT_SECRET:Nova-local-dev-secret-change-me-please-32bytes}
+      access-ttl: PT2H
+      refresh-ttl: P7D
+
+  # 扫描件/图片简历识别
+  ocr:
+    enabled: ${OCR_ENABLED:true}
+    max-bytes: ${OCR_MAX_BYTES:10485760}
+    timeout-ms: ${OCR_TIMEOUT_MS:60000}
+    daily-quota-per-tenant: ${OCR_DAILY_QUOTA:200}
+    upload-ttl-hours: ${OCR_UPLOAD_TTL_HOURS:24}
+
+  knowledge:
+    # 在线 DOCX 编辑：简历场景用不到，默认关闭
+    onlyoffice:
+      enabled: ${NOVA_KNOWLEDGE_ONLYOFFICE_ENABLED:false}
+
+  rate-limit:
+    requests-per-minute: ${NOVA_RATE_LIMIT_PER_MINUTE:300}

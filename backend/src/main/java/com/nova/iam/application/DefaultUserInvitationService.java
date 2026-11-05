@@ -1,0 +1,148 @@
+package com.nova.iam.application;
+
+import com.nova.iam.application.command.AcceptInvitationCommand;
+import com.nova.iam.application.command.InviteUserCommand;
+import com.nova.iam.application.result.AuthResult;
+import com.nova.iam.domain.model.Role;
+import com.nova.iam.domain.model.RoleCode;
+import com.nova.iam.domain.model.UserAccount;
+import com.nova.iam.domain.model.UserInvitation;
+import com.nova.iam.domain.model.InvitationStatus;
+import com.nova.iam.domain.repository.RoleRepository;
+import com.nova.iam.domain.repository.UserAccountRepository;
+import com.nova.iam.domain.repository.UserInvitationRepository;
+import com.nova.iam.domain.repository.UserRoleRepository;
+import com.nova.shared.error.BusinessException;
+import com.nova.shared.error.ErrorCode;
+import com.nova.shared.security.ActorAccess;
+import com.nova.shared.security.CurrentActor;
+import com.nova.shared.security.jwt.JwtService;
+import com.nova.tenancy.domain.model.Tenant;
+import com.nova.tenancy.domain.repository.TenantRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.Objects;
+import java.util.Set;
+
+@Service
+public class DefaultUserInvitationService implements UserInvitationService {
+
+    private final UserInvitationRepository invitations;
+    private final TenantRepository tenants;
+    private final UserAccountRepository users;
+    private final RoleRepository roles;
+    private final UserRoleRepository userRoles;
+    private final JwtService jwt;
+    private final SessionService sessions;
+    private final Clock clock;
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    private final SecureRandom random = new SecureRandom();
+
+    public DefaultUserInvitationService(UserInvitationRepository invitations, TenantRepository tenants,
+                                        UserAccountRepository users, RoleRepository roles,
+                                        UserRoleRepository userRoles, JwtService jwt, SessionService sessions,
+                                        Clock clock) {
+        this.invitations = Objects.requireNonNull(invitations, "invitations");
+        this.tenants = Objects.requireNonNull(tenants, "tenants");
+        this.users = Objects.requireNonNull(users, "users");
+        this.roles = Objects.requireNonNull(roles, "roles");
+        this.userRoles = Objects.requireNonNull(userRoles, "userRoles");
+        this.jwt = Objects.requireNonNull(jwt, "jwt");
+        this.sessions = Objects.requireNonNull(sessions, "sessions");
+        this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    @Override
+    @Transactional
+    public InvitationIssued invite(CurrentActor actor, InviteUserCommand command) {
+        Long tenantId = requireGymAdmin(actor, "user:write");
+        Objects.requireNonNull(command, "command");
+        RoleCode role = command.role();
+        if (role != RoleCode.COACH && role != RoleCode.MEMBER) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        String email = UserAccount.normalizeEmail(command.email());
+        if (users.findByNormalizedEmail(email).isPresent()) {
+            throw new BusinessException(ErrorCode.CONFLICT);
+        }
+        String rawToken = randomToken();
+        Instant expiresAt = clock.instant().plus(Duration.ofHours(24));
+        UserInvitation saved = invitations.save(UserInvitation.issue(
+                tenantId, email, role, UserInvitation.sha256(rawToken), expiresAt));
+        return new InvitationIssued(rawToken, saved.getTenantId(), saved.getEmail(), saved.getRole(), saved.getExpiresAt());
+    }
+
+    @Override
+    @Transactional
+    public AuthResult accept(AcceptInvitationCommand command) {
+        Objects.requireNonNull(command, "command");
+        String token = required(command.token(), "Invitation token");
+        UserInvitation invitation = invitations.findByTokenHash(UserInvitation.sha256(token))
+                .orElseThrow(DefaultUserInvitationService::unauthenticated);
+        Instant now = clock.instant();
+        if (invitation.getStatus() == InvitationStatus.ACCEPTED) {
+            throw new BusinessException(ErrorCode.CONFLICT);
+        }
+        if (!invitation.isAcceptable(now)) {
+            throw unauthenticated();
+        }
+        Tenant tenant = tenants.findById(invitation.getTenantId())
+                .filter(Tenant::isActive).orElseThrow(DefaultUserInvitationService::unauthenticated);
+        if (users.findByNormalizedEmail(invitation.getEmail()).isPresent()) {
+            throw new BusinessException(ErrorCode.CONFLICT);
+        }
+        UserAccount user = users.save(UserAccount.tenantUser(invitation.getTenantId(), invitation.getEmail(),
+                passwordEncoder.encode(required(command.password(), "Password")),
+                required(command.displayName(), "Display name"), invitation.getRole()));
+        Role role = roles.findByCode(invitation.getRole()).orElseThrow(DefaultUserInvitationService::unauthenticated);
+        userRoles.save(com.nova.iam.domain.model.UserRole.assign(user, role));
+        invitation.accept(now);
+        invitations.save(invitation);
+        Set<RoleCode> roleCodes = userRoles.findRoleCodesByUserId(user.getId());
+        Set<String> permissions = user.getTenantId() == null
+                ? userRoles.findPermissionCodesByUserId(user.getId())
+                : userRoles.findPermissionCodesByUserId(user.getId(), user.getTenantId());
+        if (permissions == null || (permissions.isEmpty() && user.getTenantId() != null)) {
+            permissions = userRoles.findPermissionCodesByUserId(user.getId());
+        }
+        CurrentActor actor = new CurrentActor(user.getId(), tenant.getId(), roleCodes, permissions,
+                user.getTokenVersion(), "invitation-accept");
+        com.nova.shared.security.jwt.TokenPair pair = jwt.issue(actor);
+        var refreshClaims = jwt.verify(pair.refreshToken(), com.nova.shared.security.jwt.TokenType.REFRESH);
+        sessions.store(sessions.refreshSession(refreshClaims.tenantId(), refreshClaims.userId(),
+                refreshClaims.tokenId(), refreshClaims.expiresAt()), pair.refreshToken());
+        return new AuthResult(new AuthResult.AuthenticatedUser(user.getId(), user.getTenantId(),
+                user.getNormalizedUsername(), user.getNormalizedEmail(), user.getDisplayName(), roleCodes, permissions),
+                pair);
+    }
+
+    private static Long requireGymAdmin(CurrentActor actor, String permission) {
+        ActorAccess.requireGymAdmin(actor, permission);
+        return ActorAccess.requireTenantId(actor);
+    }
+
+    private String randomToken() {
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String required(String value, String label) {
+        if (value == null || value.isBlank()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, label + " must not be blank");
+        }
+        return value.trim();
+    }
+
+    private static BusinessException unauthenticated() {
+        return new BusinessException(ErrorCode.UNAUTHENTICATED);
+    }
+}

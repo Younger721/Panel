@@ -1,0 +1,33 @@
+package com.nova.iam.application.result;
+
+import com.nova.iam.domain.model.RoleCode;
+import com.nova.shared.security.jwt.TokenPair;
+
+import java.util.Objects;
+import java.util.Set;
+
+public record AuthResult(AuthenticatedUser user, TokenPair tokens) {
+
+    public AuthResult {
+        Objects.requireNonNull(user, "user");
+        Objects.requireNonNull(tokens, "tokens");
+    }
+
+    public record AuthenticatedUser(
+            Long id,
+            Long tenantId,
+            String username,
+            String email,
+            String displayName,
+            Set<RoleCode> roles,
+            Set<String> permissions) {
+
+        public AuthenticatedUser {
+            Objects.requireNonNull(id, "id");
+            Objects.requireNonNull(username, "username");
+            Objects.requireNonNull(displayName, "displayName");
+            roles = Set.copyOf(Objects.requireNonNull(roles, "roles"));
+            permissions = Set.copyOf(Objects.requireNonNull(permissions, "permissions"));
+        }
+    }
+}

@@ -1,0 +1,207 @@
+package com.nova.iam.domain.model;
+
+import com.nova.shared.persistence.AuditableEntity;
+import com.nova.tenancy.domain.model.Tenant;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+
+import java.util.Locale;
+
+@Entity
+@Table(name = "sys_user", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_sys_user_email", columnNames = "normalized_email"),
+        @UniqueConstraint(name = "uk_sys_user_username", columnNames = "normalized_username")
+})
+public class UserAccount extends AuditableEntity {
+
+    @Column(name = "tenant_id")
+    private Long tenantId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "tenant_id", insertable = false, updatable = false,
+            foreignKey = @jakarta.persistence.ForeignKey(name = "fk_sys_user_tenant"))
+    private Tenant tenant;
+
+    @Column(name = "normalized_email", length = 320)
+    private String normalizedEmail;
+
+    /** 登录用户名（全局唯一，小写规范化存储） */
+    @Column(name = "normalized_username", length = 64)
+    private String normalizedUsername;
+
+    @Column(name = "password_hash", nullable = false, length = 255)
+    private String passwordHash;
+
+    @Column(name = "display_name", nullable = false, length = 128)
+    private String displayName;
+
+    @Column(length = 32)
+    private String phone;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private UserStatus status;
+
+    /**
+     * Convenience state for domain operations. Persistent role membership is
+     * represented exclusively by the UserRole join entity.
+     */
+    @Transient
+    private RoleCode roleCode;
+
+    @Column(name = "token_version", nullable = false)
+    private long tokenVersion;
+
+    protected UserAccount() {
+    }
+
+    private UserAccount(Long tenantId, String email, String username, String passwordHash, String displayName,
+                        String phone, RoleCode roleCode) {
+        if (roleCode == null) {
+            throw new IllegalArgumentException("Role code must not be null");
+        }
+        if (roleCode == RoleCode.PLATFORM_ADMIN && tenantId != null) {
+            throw new IllegalArgumentException("Platform admin must not have a tenant");
+        }
+        if (roleCode != RoleCode.PLATFORM_ADMIN && tenantId == null) {
+            throw new IllegalArgumentException("Tenant user requires a tenant");
+        }
+        this.tenantId = tenantId;
+        this.normalizedEmail = normalizeEmail(email);
+        this.normalizedUsername = resolveUsername(email, username);
+        this.passwordHash = require(passwordHash, "Password hash");
+        this.displayName = require(displayName, "Display name");
+        this.phone = normalizePhone(phone);
+        this.roleCode = roleCode;
+        this.status = UserStatus.ACTIVE;
+        this.tokenVersion = 0L;
+    }
+
+    public static UserAccount platformAdmin(String email, String passwordHash, String displayName) {
+        return platformAdmin(email, null, passwordHash, displayName);
+    }
+
+    public static UserAccount platformAdmin(String email, String username, String passwordHash, String displayName) {
+        return new UserAccount(null, email, username, passwordHash, displayName, null, RoleCode.PLATFORM_ADMIN);
+    }
+
+    public static UserAccount tenantUser(Long tenantId, String email, String passwordHash, String displayName) {
+        return tenantUser(tenantId, email, passwordHash, displayName, RoleCode.MEMBER);
+    }
+
+    public static UserAccount tenantUser(Long tenantId, String email, String passwordHash, String displayName,
+                                         RoleCode roleCode) {
+        return tenantUser(tenantId, email, null, passwordHash, displayName, null, roleCode);
+    }
+
+    public static UserAccount tenantUser(Long tenantId, String email, String username, String passwordHash,
+                                         String displayName, RoleCode roleCode) {
+        return tenantUser(tenantId, email, username, passwordHash, displayName, null, roleCode);
+    }
+
+    public static UserAccount tenantUser(Long tenantId, String email, String username, String passwordHash,
+                                         String displayName, String phone, RoleCode roleCode) {
+        if (roleCode == RoleCode.PLATFORM_ADMIN) {
+            throw new IllegalArgumentException("Platform admin is not a tenant user");
+        }
+        return new UserAccount(tenantId, email, username, passwordHash, displayName, phone, roleCode);
+    }
+
+    /** 为历史数据补全用户名（仅当尚未设置时写入） */
+    public void backfillUsername(String preferred) {
+        if (normalizedUsername == null || normalizedUsername.isBlank()) {
+            normalizedUsername = normalizeUsername(preferred);
+        }
+    }
+
+    public void activate() {
+        if (status != UserStatus.ACTIVE) {
+            status = UserStatus.ACTIVE;
+            incrementTokenVersion();
+        }
+    }
+
+    public void disable() {
+        if (status != UserStatus.DISABLED) {
+            status = UserStatus.DISABLED;
+            incrementTokenVersion();
+        }
+    }
+
+    public void resetPassword(String newPasswordHash) {
+        passwordHash = require(newPasswordHash, "Password hash");
+        incrementTokenVersion();
+    }
+
+    public void changeRole(RoleCode newRoleCode) {
+        if (newRoleCode == null) {
+            throw new IllegalArgumentException("Role code must not be null");
+        }
+        if (newRoleCode == roleCode) {
+            return;
+        }
+        if (newRoleCode == RoleCode.PLATFORM_ADMIN && tenantId != null) {
+            throw new IllegalArgumentException("Tenant user cannot become platform admin");
+        }
+        if (newRoleCode != RoleCode.PLATFORM_ADMIN && tenantId == null) {
+            throw new IllegalArgumentException("Platform user cannot receive tenant role");
+        }
+        roleCode = newRoleCode;
+        incrementTokenVersion();
+    }
+
+    public void incrementTokenVersion() {
+        tokenVersion++;
+    }
+
+    public Long getTenantId() { return tenantId; }
+    public String getNormalizedEmail() { return normalizedEmail; }
+    public String getNormalizedUsername() { return normalizedUsername; }
+    public String getPasswordHash() { return passwordHash; }
+    public String getDisplayName() { return displayName; }
+    public String getPhone() { return phone; }
+    public UserStatus getStatus() { return status; }
+    public RoleCode getRoleCode() { return roleCode; }
+    public long getTokenVersion() { return tokenVersion; }
+
+    public static String normalizeEmail(String value) {
+        return value == null || value.trim().isEmpty() ? null : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    public static String normalizeUsername(String value) {
+        return require(value, "Username").trim().toLowerCase(Locale.ROOT);
+    }
+
+    /** 未显式指定用户名时，默认取邮箱 @ 前一段 */
+    public static String defaultUsernameFromEmail(String email) {
+        String normalized = normalizeEmail(email);
+        int at = normalized.indexOf('@');
+        return at > 0 ? normalized.substring(0, at) : normalized;
+    }
+
+    private static String resolveUsername(String email, String username) {
+        if (username == null || username.isBlank()) {
+            return defaultUsernameFromEmail(email);
+        }
+        return normalizeUsername(username);
+    }
+
+    private static String normalizePhone(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String require(String value, String label) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException(label + " must not be blank");
+        }
+        return value.trim();
+    }
+}
