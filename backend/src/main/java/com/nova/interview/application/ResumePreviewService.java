@@ -90,7 +90,8 @@ public class ResumePreviewService {
                             section.lines().stream()
                                     .map(line -> new LineView(line.page(), line.text(),
                                             round(line.x()), round(line.y()), round(line.width()), round(line.height()),
-                                            Math.round(line.size() * 10f) / 10f))
+                                            Math.round(line.size() * 10f) / 10f,
+                                            Math.round(line.fontSize() * 10f) / 10f, line.font(), line.bold()))
                                     .toList()))
                     .toList();
             return new TextLayerView(true, null, pages, sections, edits);
@@ -232,7 +233,8 @@ public class ResumePreviewService {
     public record PartView(int page, float x, float y, float width, float height) {
     }
 
-    public record LineView(int page, String text, float x, float y, float width, float height, float size) {
+    public record LineView(int page, String text, float x, float y, float width, float height, float size,
+                           float fontSize, String font, boolean bold) {
     }
 
     public record RectView(float x, float y, float width, float height) {

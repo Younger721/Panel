@@ -4,6 +4,8 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDFontDescriptor;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -533,7 +535,14 @@ public final class PdfPreview implements AutoCloseable {
      *
      * @param size 字号（pt），前端按它渲染覆盖层，才能和底图对得上
      */
-    public record LineBox(int page, String text, float x, float y, float width, float height, float size) {
+    /**
+     * 一条视觉行。
+     *
+     * @param size     版面用的字高（行框/高亮条的高度按它算）
+     * @param fontSize 实际渲染字号（按全角字宽量的），编辑框还原字体大小用这个
+     */
+    public record LineBox(int page, String text, float x, float y, float width, float height, float size,
+                          float fontSize, String font, boolean bold) {
     }
 
     /**
@@ -592,6 +601,7 @@ public final class PdfPreview implements AutoCloseable {
             float right = -Float.MAX_VALUE;
             float bottom = -Float.MAX_VALUE;
             float size = 0f;
+            List<Float> wideAdvances = new ArrayList<>();
             for (TextPosition position : textPositions) {
                 String unicode = position.getUnicode();
                 if (unicode == null || unicode.isEmpty()) {
@@ -606,12 +616,129 @@ public final class PdfPreview implements AutoCloseable {
                 top = Math.min(top, y0);
                 bottom = Math.max(bottom, y0 + band * 1.12f);
                 size = Math.max(size, band);
+                if (isWide(unicode.charAt(0))) {
+                    wideAdvances.add(width / unicode.length());
+                }
             }
             if (right <= left || size <= 0f) {
                 return;
             }
+            // 真实字号按「全角字的字宽」量：不少简历 PDF 的 Tf 值和实际渲染大小对不上
+            // （文字矩阵里带缩放），直接拿 getFontSizeInPt 会把编辑框里的字放大一圈
+            float fontSize = median(wideAdvances);
+            if (fontSize <= 0f) {
+                fontSize = size;
+            }
+            // 字体名/粗体跟着这一行走：编辑框要还原成简历上的样子，不能一律用系统默认字体。
+            // 混排的行（"AI智能视频标签…"）按字最多的那个字体算，否则前半截 Arial 会把整行带偏
+            Map<String, Integer> weight = new LinkedHashMap<>();
+            Map<String, PDFont> fonts = new LinkedHashMap<>();
+            for (TextPosition position : textPositions) {
+                String unicode = position.getUnicode();
+                PDFont used = position.getFont();
+                if (unicode == null || unicode.isEmpty() || used == null) {
+                    continue;
+                }
+                String key = used.getName() == null ? "" : used.getName();
+                fonts.putIfAbsent(key, used);
+                weight.merge(key, unicode.length(), Integer::sum);
+            }
+            PDFont dominant = null;
+            int best = -1;
+            for (Map.Entry<String, Integer> entry : weight.entrySet()) {
+                if (entry.getValue() > best) {
+                    best = entry.getValue();
+                    dominant = fonts.get(entry.getKey());
+                }
+            }
+            String fontName = fontName(dominant);
+            boolean bold = isBold(dominant);
             byPageLines.computeIfAbsent(page, key -> new ArrayList<>())
-                    .add(new LineBox(page, value, left, top, right - left, bottom - top, size));
+                    .add(new LineBox(page, value, left, top, right - left, bottom - top, size, fontSize, fontName, bold));
+        }
+
+        @Override
+        protected void endDocument(PDDocument document) throws IOException {
+            super.endDocument(document);
+            // 纯英文/数字的行量不出全角字宽，用全篇中文行量出来的比例补一下，
+            // 否则同一份简历里英文那几行会明显比中文大
+            List<Float> ratios = new ArrayList<>();
+            for (List<LineBox> lines : byPageLines.values()) {
+                for (LineBox line : lines) {
+                    if (line.fontSize() > 0f && line.fontSize() < line.size() - 0.5f) {
+                        ratios.add(line.fontSize() / line.size());
+                    }
+                }
+            }
+            float ratio = median(ratios);
+            if (ratio <= 0f) {
+                return;
+            }
+            for (Map.Entry<Integer, List<LineBox>> entry : byPageLines.entrySet()) {
+                List<LineBox> fixed = new ArrayList<>(entry.getValue().size());
+                for (LineBox line : entry.getValue()) {
+                    if (line.fontSize() < line.size() - 0.5f) {
+                        fixed.add(line);
+                    } else {
+                        fixed.add(new LineBox(line.page(), line.text(), line.x(), line.y(), line.width(),
+                                line.height(), line.size(), Math.round(line.size() * ratio * 10f) / 10f,
+                                line.font(), line.bold()));
+                    }
+                }
+                entry.setValue(fixed);
+            }
+        }
+
+        /** 全角字符（中文、中文标点、全角符号）——它的字宽就是字号。 */
+        private static boolean isWide(char value) {            return (value >= 0x2E80 && value <= 0x9FFF)
+                    || (value >= 0xF900 && value <= 0xFAFF)
+                    || (value >= 0xFE30 && value <= 0xFE4F)
+                    || (value >= 0xFF00 && value <= 0xFF60);
+        }
+
+        private static float median(List<Float> values) {
+            if (values.isEmpty()) {
+                return 0f;
+            }
+            List<Float> sorted = new ArrayList<>(values);
+            sorted.sort(Float::compare);
+            return sorted.get(sorted.size() / 2);
+        }
+
+        /** 去掉子集前缀（ABCDEF+）和样式后缀，只留字体本名，前端才好映射成 CSS family。 */
+        private static String fontName(PDFont font) {
+            if (font == null) {
+                return null;
+            }
+            String name = font.getName();
+            if (name == null || name.isBlank()) {
+                return null;
+            }
+            int plus = name.indexOf('+');
+            if (plus >= 0 && plus < 8) {
+                name = name.substring(plus + 1);
+            }
+            int comma = name.indexOf(',');
+            if (comma > 0) {
+                name = name.substring(0, comma);
+            }
+            name = name.replace('-', ' ').replace('_', ' ').trim();
+            return name.isEmpty() ? null : name;
+        }
+
+        private static boolean isBold(PDFont font) {
+            if (font == null) {
+                return false;
+            }
+            String name = font.getName() == null ? "" : font.getName().toLowerCase(Locale.ROOT);
+            if (name.contains("bold") || name.contains("black") || name.contains("heavy") || name.contains("semibold")) {
+                return true;
+            }
+            PDFontDescriptor descriptor = font.getFontDescriptor();
+            if (descriptor == null) {
+                return false;
+            }
+            return descriptor.getFontWeight() >= 600f || descriptor.isForceBold();
         }
 
         List<TextPosition> positionsOf(int pageNumber) {

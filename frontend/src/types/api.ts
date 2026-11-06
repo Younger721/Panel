@@ -93,7 +93,13 @@ export interface TextLine {
   y: number
   width: number
   height: number
+  /** 版面用的字高（行框/高亮条） */
   size: number
+  /** 实际渲染字号（按全角字宽量的），还原字体大小时用它 */
+  fontSize?: number
+  /** PDF 里的字体名，例如 KaiTi / ArialMT；拿不到时为 null */
+  font?: string | null
+  bold?: boolean
 }
 
 /** 板块在某一页上占的矩形（跨页的板块有多段） */

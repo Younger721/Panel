@@ -71,10 +71,16 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
   const savedRange = useRef<Range | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   /** 打开中的编辑框内容：还没点「完成」也算数，保存时不能丢 */
-  const draft = useRef<{ index: number | null; html: string }>({ index: null, html: '' })
+  const draft = useRef<{ index: number | null; html: string; seed: string }>({
+    index: null,
+    html: '',
+    seed: ''
+  })
 
   const [zoom, setZoom] = useState(1)
   const [active, setActive] = useState<number | null>(null)
+  /** 打开编辑框那一刻的缩放：编辑框按这个倍数还原字号，和上面那张纸一样大 */
+  const [panelScale, setPanelScale] = useState(1)
   const [images, setImages] = useState<Record<number, string>>({})
 
   const baseWidth = layer.pages[0]?.width ?? 595
@@ -121,7 +127,7 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     }
   }, [layer.pages, resumeId])
 
-  /** 每一块没被改过时的初始 HTML（按原文排版还原） */
+  /** 每一块没被改过时的初始 HTML（按原文排版还原，字号跟着页面缩放走） */
   const seeds = useMemo(() => {
     const right = new Map<number, number>()
     layer.pages.forEach(page => {
@@ -133,15 +139,19 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     const result = new Map<number, string>()
     layer.sections.forEach(section => {
       const pageOf = section.lines[0]?.page ?? 1
-      result.set(section.index, toSeedHtml(section.lines, right.get(pageOf) ?? 0))
+      result.set(section.index, toSeedHtml(section.lines, right.get(pageOf) ?? 0, zoom))
     })
     return result
-  }, [layer.pages, layer.sections])
+  }, [layer.pages, layer.sections, zoom])
 
   const htmlOf = useCallback(
     (index: number) => edits[String(index)] ?? seeds.get(index) ?? '',
     [edits, seeds]
   )
+
+  // 只在「打开哪一块」时灌内容：缩放变了不能把正在写的东西冲掉
+  const htmlOfRef = useRef(htmlOf)
+  htmlOfRef.current = htmlOf
 
   // 打开编辑框：把这一块现在的 HTML 灌进去
   useEffect(() => {
@@ -149,9 +159,9 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     if (active === null || !node) {
       return
     }
-    const html = htmlOf(active)
+    const html = htmlOfRef.current(active)
     node.innerHTML = html
-    draft.current = { index: active, html }
+    draft.current = { index: active, html, seed: html.trim() }
     node.focus()
     // 光标放到开头，别一打开就滚到底
     const range = document.createRange()
@@ -169,14 +179,13 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
       const offset = part.getBoundingClientRect().top - scroller.getBoundingClientRect().top
       scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + offset - 40), behavior: 'smooth' })
     }
-  }, [active, htmlOf])
+  }, [active])
 
   const commitDraft = useCallback(() => {
-    const { index, html } = draft.current
+    const { index, html, seed } = draft.current
     if (index === null) {
       return
     }
-    const seed = (seeds.get(index) ?? '').trim()
     const value = html.trim()
     const next = { ...edits }
     if (!value || value === seed) {
@@ -185,15 +194,15 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
       next[String(index)] = value
     }
     onEditsChange(next)
-    draft.current = { index: null, html: '' }
-  }, [edits, onEditsChange, seeds])
+    draft.current = { index: null, html: '', seed: '' }
+  }, [edits, onEditsChange])
 
   const close = useCallback(
     (commit: boolean) => {
       if (commit) {
         commitDraft()
       } else {
-        draft.current = { index: null, html: '' }
+        draft.current = { index: null, html: '', seed: '' }
       }
       setActive(null)
     },
@@ -244,7 +253,7 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
   const syncDraft = useCallback(() => {
     const node = editorRef.current
     if (node && draft.current.index !== null) {
-      draft.current = { index: draft.current.index, html: node.innerHTML }
+      draft.current = { ...draft.current, html: node.innerHTML }
     }
   }, [])
 
@@ -325,11 +334,11 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
           .map(section => {
             const key = String(section.index)
             // 正在编辑的那块以编辑框里的内容为准
-            const html =
-              draft.current.index === section.index
-                ? draft.current.html
-                : edits[key] ?? seeds.get(section.index) ?? ''
-            const seed = (seeds.get(section.index) ?? '').trim()
+            const editing = draft.current.index === section.index
+            const html = editing
+              ? draft.current.html
+              : edits[key] ?? seeds.get(section.index) ?? ''
+            const seed = editing ? draft.current.seed : (seeds.get(section.index) ?? '').trim()
             const body =
               html.trim() && html.trim() !== seed
                 ? htmlToPlainText(html)
@@ -344,9 +353,8 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
       },
       getEdits() {
         const result: Record<string, string> = { ...edits }
-        const { index, html } = draft.current
+        const { index, html, seed } = draft.current
         if (index !== null) {
-          const seed = (seeds.get(index) ?? '').trim()
           if (html.trim() && html.trim() !== seed) {
             result[String(index)] = html
           } else {
@@ -458,6 +466,8 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
                         if (active !== null) {
                           commitDraft()
                         }
+                        // 记下这一刻的缩放：编辑框按同一倍数还原字号，和上面那张纸一样大
+                        setPanelScale(zoom)
                         setActive(section.index)
                       }}
                       title={`${section.title} · 点击编辑`}
@@ -527,7 +537,8 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
                 onChange={event => {
                   const value = event.target.value
                   if (value) {
-                    styleSelection({ 'font-size': `${value}px` })
+                    // 字号按页面单位（pt）给，乘上缩放才是编辑框里的像素
+                    styleSelection({ 'font-size': `${Math.round(Number(value) * panelScale)}px` })
                   }
                   event.target.value = ''
                 }}
@@ -627,15 +638,27 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
             />
           </div>
 
-          <div
-            ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            spellCheck={false}
-            onInput={syncDraft}
-            className="min-h-0 flex-1 overflow-auto px-6 py-4 text-slate-800 outline-none"
-            style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-          />
+          <div className="min-h-0 flex-1 overflow-auto bg-slate-100 px-6 py-4">
+            {/* 编辑框按「和上面那张纸同宽、同倍数」摆：字体、字号、行距看起来一模一样，
+                不是另起一套排版 */}
+            <div
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              spellCheck={false}
+              onInput={syncDraft}
+              className="mx-auto text-slate-800 outline-none"
+              style={{
+                width: baseWidth * panelScale,
+                maxWidth: '100%',
+                padding: `${12 * panelScale}px ${24 * panelScale}px`,
+                background: '#ffffff',
+                boxShadow: '0 1px 3px rgba(15, 23, 42, 0.12)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
+              }}
+            />
+          </div>
         </div>
       )}
     </div>
