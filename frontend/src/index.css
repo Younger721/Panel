@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-100 text-slate-800 antialiased;
+  font-family: ui-sans-serif, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+@layer components {
+  .paper {
+    @apply mx-auto bg-white px-[64px] py-[56px] shadow-paper;
+    width: 794px;
+    max-width: 100%;
+  }
+
+  .paper-block {
+    @apply transition-[filter,opacity] duration-150;
+  }
+
+  .paper-block.is-dimmed {
+    @apply opacity-40 blur-[1.5px];
+  }
+
+  mark[data-point-id] {
+    @apply cursor-pointer rounded-[2px] px-[1px] transition-colors duration-150;
+    border-bottom: 2px solid transparent;
+  }
+
+  mark[data-level='STRONG'] {
+    @apply bg-emerald-100/80;
+    border-bottom-color: #34d399;
+  }
+
+  mark[data-level='MEDIUM'] {
+    @apply bg-amber-100/80;
+    border-bottom-color: #fbbf24;
+  }
+
+  mark[data-level='WEAK'] {
+    @apply bg-rose-100/80;
+    border-bottom-color: #fb7185;
+  }
+
+  mark[data-point-id].is-hovered {
+    @apply bg-yellow-200;
+    border-bottom-color: #f59e0b;
+  }
+
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white p-4 transition-all duration-150;
+  }
+
+  .card.is-hovered {
+    @apply scale-[1.02] border-slate-300 shadow-lg;
+  }
+}
