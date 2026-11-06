@@ -61,7 +61,9 @@ public class ResumeParsingService {
      * @return 结构化结果 + 归一化后的 JSON 原文（落库用）
      */
     public ParseOutcome parse(Long resumeId, String fileName, String contentType, byte[] bytes) {
-        String text = parsers.parse(fileName, contentType, bytes);
+        com.nova.knowledge.infrastructure.parser.ParsedDocument document =
+                parsers.parseStructured(fileName, contentType, bytes);
+        String text = document.plainText();
         if (text == null || text.isBlank()) {
             throw new IllegalStateException("resume text is empty after parsing");
         }
@@ -74,7 +76,7 @@ public class ResumeParsingService {
             String normalized = objectMapper.writeValueAsString(parsed);
             log.info("Resume parsed: id={}, model={}, skills={}, projects={}", resumeId, modelName,
                     parsed.skills().size(), parsed.projects().size());
-            return new ParseOutcome(parsed, normalized, modelName);
+            return new ParseOutcome(parsed, normalized, modelName, document);
         } catch (Exception ex) {
             throw new IllegalStateException("model returned unparsable resume JSON: " + abbreviate(json), ex);
         }
@@ -97,6 +99,7 @@ public class ResumeParsingService {
         return value.length() <= 200 ? value : value.substring(0, 200) + "...";
     }
 
-    public record ParseOutcome(ParsedResume parsed, String normalizedJson, String modelName) {
+    public record ParseOutcome(ParsedResume parsed, String normalizedJson, String modelName,
+                               com.nova.knowledge.infrastructure.parser.ParsedDocument document) {
     }
 }

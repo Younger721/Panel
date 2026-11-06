@@ -6,7 +6,9 @@ public enum ResumeStatus {
     PENDING,
     /** 解析中（持有租约）。进程崩溃后由 {@code recoverExpired} 回收。 */
     PARSING,
-    /** 解析完成，已有结构化画像。 */
+    /** 抽模块与小点中：原文已解析，正在做深度分析与批注。 */
+    ANALYZING,
+    /** 解析完成，已有结构化画像与批注。 */
     PARSED,
     /** 重试耗尽仍失败。 */
     FAILED

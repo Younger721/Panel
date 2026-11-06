@@ -1,6 +1,7 @@
 package com.nova.interview.api;
 
 import com.nova.interview.application.ParsedResume;
+import com.nova.interview.application.ResumeAnalysisService;
 import com.nova.interview.application.ResumeService;
 import com.nova.interview.application.ResumeService.ResumeView;
 import com.nova.shared.api.ApiResponse;
@@ -29,10 +30,13 @@ import java.util.List;
 public class ResumeController {
 
     private final ResumeService service;
+    private final ResumeAnalysisService analysisService;
     private final CurrentActorProvider actors;
 
-    public ResumeController(ResumeService service, CurrentActorProvider actors) {
+    public ResumeController(ResumeService service, ResumeAnalysisService analysisService,
+                            CurrentActorProvider actors) {
         this.service = service;
+        this.analysisService = analysisService;
         this.actors = actors;
     }
 
@@ -59,6 +63,22 @@ public class ResumeController {
     public ApiResponse<ParsedResume> profile(@PathVariable Long id) {
         require("resume:read");
         return ApiResponse.success(service.profile(id));
+    }
+
+    /** 批注页数据源：Markdown + 块结构 + 模块/小点/点评。 */
+    @GetMapping("/{id}/analysis")
+    public ApiResponse<ResumeAnalysisService.AnalysisView> analysis(@PathVariable Long id) {
+        require("resume:read");
+        return ApiResponse.success(analysisService.view(id));
+    }
+
+    /** 下载转换后的 Markdown 原文。 */
+    @GetMapping(value = "/{id}/markdown", produces = MediaType.TEXT_MARKDOWN_VALUE)
+    public org.springframework.http.ResponseEntity<String> markdown(@PathVariable Long id) {
+        require("resume:read");
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(MediaType.TEXT_MARKDOWN)
+                .body(analysisService.markdown(id));
     }
 
     private void require(String permission) {

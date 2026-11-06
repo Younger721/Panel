@@ -35,17 +35,20 @@ public class ResumeParseWorker implements AsyncJobHandler {
     private final ResumeProfileRepository profiles;
     private final KnowledgeObjectStore store;
     private final ResumeParsingService parsing;
+    private final ResumeAnalysisService analysis;
     private final PersistentJobQueue jobs;
 
     public ResumeParseWorker(ResumeRepository resumes,
                              ResumeProfileRepository profiles,
                              KnowledgeObjectStore store,
                              ResumeParsingService parsing,
+                             ResumeAnalysisService analysis,
                              PersistentJobQueue jobs) {
         this.resumes = resumes;
         this.profiles = profiles;
         this.store = store;
         this.parsing = parsing;
+        this.analysis = analysis;
         this.jobs = jobs;
     }
 
@@ -84,6 +87,11 @@ public class ResumeParseWorker implements AsyncJobHandler {
                     outcome.parsed().skills().size(),
                     outcome.modelName());
             profiles.save(profile);
+
+            // 第二段：原文已可用，继续做模块/小点的深度分析（失败会重试）
+            resume.markAnalyzing();
+            resumes.save(resume);
+            analysis.analyze(resume.getId(), outcome.document());
 
             resume.markParsed();
             resumes.save(resume);

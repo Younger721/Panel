@@ -66,6 +66,13 @@ public class Resume {
         touch();
     }
 
+    /** 原文已解析，进入模块/小点的深度分析阶段。 */
+    public void markAnalyzing() {
+        this.status = ResumeStatus.ANALYZING;
+        this.lastError = null;
+        touch();
+    }
+
     public void markParsed() {
         this.status = ResumeStatus.PARSED;
         this.lastError = null;
