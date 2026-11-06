@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { ChevronLeft, Loader2, Play, Sparkles } from 'lucide-react'
 import { resumeApi } from '@/api/resume'
 import { interviewApi, type AgentProgress } from '@/api/interview'
 import type { AnalysisStats, ResumeView } from '@/types/api'
@@ -33,6 +34,8 @@ export default function InterviewSetupPage() {
       .catch(err => setError(err instanceof Error ? err.message : '简历还没有批注结果'))
   }, [resumeId])
 
+  const maxQuestions = Math.max(1, Math.min(10, stats ? stats.points : 10))
+
   async function start() {
     setBusy(true)
     setError(null)
@@ -56,54 +59,70 @@ export default function InterviewSetupPage() {
   }
 
   if (!resumeId) {
-    return <p className="p-12 text-sm text-slate-500">缺少简历 id，请从批注页进入。</p>
+    return (
+      <div className="card mx-auto mt-16 max-w-lg p-10 text-center">
+        <p className="text-sm text-slate-500">缺少简历 id，请从批注页进入。</p>
+        <Link to="/resumes" className="btn-ghost mt-5">
+          去简历库
+        </Link>
+      </div>
+    )
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-12">
-      <Link to={`/resumes/${resumeId}`} className="text-xs text-slate-400 hover:text-slate-600">
-        ← 返回批注
+    <div className="mx-auto max-w-2xl">
+      <Link
+        to={`/resumes/${resumeId}`}
+        className="flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+        返回批注
       </Link>
-      <h1 className="mt-6 text-xl font-semibold text-slate-900">开始模拟面试</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        {resume ? resume.fileName : `简历 #${resumeId}`}
-        {stats ? ` · ${stats.modules} 个模块 / ${stats.points} 个小点（弱 ${stats.weak}）` : ''}
-      </p>
 
-      <section className="mt-8 space-y-8 rounded-2xl border border-slate-200 bg-white p-6">
+      <div className="mb-6 mt-4">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">开始模拟面试</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          {resume ? resume.fileName : `简历 #${resumeId}`}
+          {stats ? ` · ${stats.modules} 个模块 / ${stats.points} 个小点（弱 ${stats.weak}）` : ''}
+        </p>
+      </div>
+
+      <section className="card space-y-8 p-7">
         <div>
           <div className="flex items-baseline justify-between">
-            <label htmlFor="count" className="text-sm font-medium text-slate-700">
+            <label htmlFor="count" className="text-sm font-semibold text-slate-800">
               主问题数量
             </label>
-            <span className="font-mono text-sm text-slate-900">{questionCount}</span>
+            <span className="rounded-lg bg-primary-50 px-2.5 py-1 text-sm font-bold text-primary-600">
+              {questionCount}
+            </span>
           </div>
           <input
             id="count"
             type="range"
             min={1}
-            max={Math.max(1, Math.min(10, stats ? stats.points : 10))}
+            max={maxQuestions}
             value={questionCount}
             onChange={event => setQuestionCount(Number(event.target.value))}
             disabled={busy}
-            className="mt-3 w-full accent-slate-900"
+            className="mt-4 w-full accent-primary-500"
           />
           <p className="mt-2 text-xs text-slate-400">每个问题对应简历里的一个批注点，优先问写得弱的。</p>
         </div>
 
         <div>
-          <p className="text-sm font-medium text-slate-700">每个问题最多追问</p>
-          <div className="mt-3 flex gap-2">
+          <p className="text-sm font-semibold text-slate-800">每个问题最多追问</p>
+          <div className="mt-3 grid grid-cols-4 gap-2">
             {FOLLOW_UP_OPTIONS.map(option => (
               <button
                 key={option}
                 type="button"
                 onClick={() => setFollowUpLimit(option)}
                 disabled={busy}
-                className={`rounded-lg border px-4 py-1.5 text-sm transition ${
+                className={`rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
                   followUpLimit === option
-                    ? 'border-slate-900 bg-slate-900 text-white'
-                    : 'border-slate-300 text-slate-600 hover:border-slate-400'
+                    ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-500/25'
+                    : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                 }`}
               >
                 {option === 0 ? '不追问' : `${option} 次`}
@@ -111,22 +130,29 @@ export default function InterviewSetupPage() {
             ))}
           </div>
           <p className="mt-2 text-xs text-slate-400">
-            回答低于 70 分才会追问，答得好直接进入下一题；最多 {questionCount * (1 + followUpLimit)} 轮。
+            回答低于 70 分才会追问，答得好直接进入下一题；最多 {questionCount * (1 + followUpLimit)} 轮对话。
           </p>
+        </div>
+
+        <div className="rounded-xl bg-slate-50 p-4">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Sparkles className="h-3.5 w-3.5 text-primary-500" />
+            <span>
+              Planner 从 {stats ? stats.points : '—'} 个批注点里挑 {questionCount} 个，Interviewer 逐题提问，
+              Evaluator 带证据评分，Reviewer 只在一题多解时复核。
+            </span>
+          </div>
         </div>
 
         {error && <p className="text-xs text-rose-600">{error}</p>}
 
-        <button
-          onClick={() => void start()}
-          disabled={busy}
-          className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
-        >
+        <button onClick={() => void start()} disabled={busy} className="btn-primary w-full py-3 text-base">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           {busy ? '正在准备…' : '开始面试'}
         </button>
 
         {steps.length > 0 && (
-          <ul className="space-y-1.5 rounded-lg bg-slate-50 p-4">
+          <ul className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
             {steps.map((step, index) => (
               <li key={index} className="flex items-center gap-2 text-xs text-slate-600">
                 <span
@@ -136,7 +162,7 @@ export default function InterviewSetupPage() {
                 />
                 <span className="font-medium">{step.agent}</span>
                 <span className="text-slate-400">{step.stage}</span>
-                {step.message && <span className="text-slate-400">· {step.message}</span>}
+                {step.message && <span className="truncate text-slate-400">· {step.message}</span>}
                 {step.status === 'COMPLETED' && step.durationMs > 0 && (
                   <span className="ml-auto font-mono text-[10px] text-slate-400">{step.durationMs}ms</span>
                 )}

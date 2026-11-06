@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { ChevronLeft, TrendingUp } from 'lucide-react'
 import { interviewApi } from '@/api/interview'
 import type { InterviewSessionView, ReportPayload, TurnEvaluation } from '@/types/api'
 import { formatDate, scoreBg, scoreLabel, scoreTone } from '@/utils/format'
@@ -8,24 +9,24 @@ function ScoreRing({ score }: { score: number }) {
   const radius = 44
   const circumference = 2 * Math.PI * radius
   const dash = (Math.max(0, Math.min(100, score)) / 100) * circumference
-  const stroke = score >= 80 ? '#059669' : score >= 60 ? '#d97706' : '#dc2626'
+  const stroke = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#f43f5e'
   return (
-    <div className="relative h-28 w-28">
+    <div className="relative h-28 w-28 shrink-0">
       <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
-        <circle cx="50" cy="50" r={radius} fill="none" stroke="#e2e8f0" strokeWidth="8" />
+        <circle cx="50" cy="50" r={radius} fill="none" stroke="#eef2ff" strokeWidth="9" />
         <circle
           cx="50"
           cy="50"
           r={radius}
           fill="none"
           stroke={stroke}
-          strokeWidth="8"
+          strokeWidth="9"
           strokeLinecap="round"
           strokeDasharray={`${dash} ${circumference}`}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={`text-2xl font-semibold ${scoreTone(score)}`}>{score}</span>
+        <span className={`text-3xl font-bold ${scoreTone(score)}`}>{score}</span>
         <span className="text-[10px] text-slate-400">{scoreLabel(score)}</span>
       </div>
     </div>
@@ -61,26 +62,31 @@ export default function ReportPage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-lg px-6 py-24 text-center">
+      <div className="card mx-auto mt-16 max-w-lg p-10 text-center">
         <p className="text-sm text-rose-600">{error}</p>
-        <Link to={`/interview/${sessionId}`} className="mt-4 inline-block text-sm underline">
+        <Link to={`/interview/${sessionId}`} className="btn-ghost mt-5">
           回到面试
         </Link>
       </div>
     )
   }
   if (!session || !payload) {
-    return <p className="p-12 text-sm text-slate-400">加载中…</p>
+    return <p className="py-24 text-center text-sm text-slate-400">加载中…</p>
   }
 
   const report = payload.report || {}
   const overall = payload.overallScore ?? session.overallScore ?? 0
+  const solvedTurns = session.turns.filter(turn => turn.answer !== null)
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-12">
-      <div className="flex items-center gap-3">
-        <Link to={`/resumes/${session.resumeId}`} className="text-xs text-slate-400 hover:text-slate-600">
-          ← 简历批注
+    <div className="mx-auto max-w-3xl">
+      <div className="flex items-center gap-4">
+        <Link
+          to={`/resumes/${session.resumeId}`}
+          className="flex items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          简历批注
         </Link>
         <Link to={`/interview/${session.id}`} className="text-xs text-slate-400 hover:text-slate-600">
           面试过程
@@ -90,59 +96,69 @@ export default function ReportPage() {
         </Link>
       </div>
 
-      <section className="mt-6 flex flex-wrap items-center gap-8 rounded-2xl border border-slate-200 bg-white p-6">
+      <section className="card mt-5 flex flex-wrap items-center gap-8 p-7">
         <ScoreRing score={overall} />
         <div className="min-w-0 flex-1">
-          <h1 className="text-lg font-semibold text-slate-900">面试报告</h1>
-          <p className="mt-1 text-[11px] text-slate-400">
-            {formatDate(session.createdAt)} · {session.questionCount} 个主问题 · 追问上限 {session.followUpLimit}
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">面试报告</h1>
+          <p className="mt-1 text-xs text-slate-400">
+            {formatDate(session.createdAt)} · {session.questionCount} 个主问题 · 追问上限 {session.followUpLimit} ·{' '}
+            {solvedTurns.length} 轮作答
           </p>
-          {report.summary && (
-            <p className="mt-3 text-[13px] leading-relaxed text-slate-700">{report.summary}</p>
-          )}
+          {report.summary && <p className="mt-3 text-[13.5px] leading-relaxed text-slate-700">{report.summary}</p>}
         </div>
       </section>
 
       {(report.skillScores || []).length > 0 && (
-        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-slate-400">能力分布</h2>
-          <ul className="mt-4 space-y-3">
+        <section className="card mt-5 p-7">
+          <h2 className="section-label">能力分布</h2>
+          <ul className="mt-4 space-y-4">
             {(report.skillScores || []).map(item => (
               <li key={item.skill}>
-                <div className="flex items-baseline justify-between text-[12.5px]">
-                  <span className="text-slate-700">{item.skill}</span>
-                  <span className={`font-mono ${scoreTone(item.score)}`}>{item.score}</span>
+                <div className="flex items-baseline justify-between text-[13px]">
+                  <span className="font-medium text-slate-700">{item.skill}</span>
+                  <span className={`font-mono font-semibold ${scoreTone(item.score)}`}>{item.score}</span>
                 </div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                  <div className={`h-full ${scoreBg(item.score)}`} style={{ width: `${item.score}%` }} />
+                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-full rounded-full ${scoreBg(item.score)}`}
+                    style={{ width: `${Math.max(0, Math.min(100, item.score))}%` }}
+                  />
                 </div>
-                {item.comment && <p className="mt-1 text-[11.5px] text-slate-500">{item.comment}</p>}
+                {item.comment && <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-500">{item.comment}</p>}
               </li>
             ))}
           </ul>
         </section>
       )}
 
-      <div className="mt-6 grid gap-6 sm:grid-cols-2">
+      <div className="mt-5 grid gap-5 sm:grid-cols-2">
         {(report.strengths || []).length > 0 && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-6">
-            <h2 className="text-xs font-medium uppercase tracking-wide text-emerald-600">做得好的</h2>
-            <ul className="mt-3 space-y-2">
+          <section className="card p-6">
+            <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-600">
+              <TrendingUp className="h-3.5 w-3.5" />
+              做得好的
+            </h2>
+            <ul className="mt-3 space-y-2.5">
               {(report.strengths || []).map((item, index) => (
-                <li key={index} className="text-[12.5px] leading-relaxed text-slate-700">
-                  {item}
+                <li key={index} className="flex gap-2 text-[12.5px] leading-relaxed text-slate-700">
+                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-emerald-400" />
+                  <span>{item}</span>
                 </li>
               ))}
             </ul>
           </section>
         )}
         {(report.improvements || []).length > 0 && (
-          <section className="rounded-2xl border border-slate-200 bg-white p-6">
-            <h2 className="text-xs font-medium uppercase tracking-wide text-rose-600">需要补的</h2>
-            <ul className="mt-3 space-y-2">
+          <section className="card p-6">
+            <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-rose-600">
+              <TrendingUp className="h-3.5 w-3.5 rotate-180" />
+              需要补的
+            </h2>
+            <ul className="mt-3 space-y-2.5">
               {(report.improvements || []).map((item, index) => (
-                <li key={index} className="text-[12.5px] leading-relaxed text-slate-700">
-                  {item}
+                <li key={index} className="flex gap-2 text-[12.5px] leading-relaxed text-slate-700">
+                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-rose-400" />
+                  <span>{item}</span>
                 </li>
               ))}
             </ul>
@@ -150,36 +166,42 @@ export default function ReportPage() {
         )}
       </div>
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-slate-400">逐题记录</h2>
-        <ul className="mt-4 space-y-5">
+      <section className="card mt-5 p-7">
+        <h2 className="section-label">逐题记录</h2>
+        <ul className="mt-4 divide-y divide-slate-100">
           {session.turns.map(turn => {
             const evaluation = turn.evaluation as TurnEvaluation | null
             return (
-              <li key={turn.seq} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
-                <div className="flex items-center gap-2 text-[11px]">
-                  <span className="font-mono text-slate-400">Q{turn.seq}</span>
+              <li key={turn.seq} className="py-4 first:pt-0 last:pb-0">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`flex h-6 min-w-6 items-center justify-center rounded-lg px-1.5 font-mono text-[11px] font-semibold ${
+                      turn.kind === 'FOLLOW_UP' ? 'bg-amber-50 text-amber-600' : 'bg-primary-50 text-primary-600'
+                    }`}
+                  >
+                    Q{turn.seq}
+                  </span>
                   {turn.kind === 'FOLLOW_UP' && (
-                    <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+                    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
                       追问 L{turn.depth}
                     </span>
                   )}
-                  <span className="text-slate-400">{turn.skill}</span>
+                  <span className="text-[11px] text-slate-400">{turn.skill}</span>
                   {turn.score !== null && (
-                    <span className={`ml-auto font-mono font-semibold ${scoreTone(turn.score)}`}>{turn.score}</span>
+                    <span className={`ml-auto font-mono text-sm font-bold ${scoreTone(turn.score)}`}>{turn.score}</span>
                   )}
                 </div>
-                <p className="mt-1.5 text-[13px] leading-relaxed text-slate-900">{turn.question}</p>
+                <p className="mt-2 text-[13.5px] font-medium leading-relaxed text-slate-900">{turn.question}</p>
                 {turn.answer && (
-                  <p className="mt-1.5 whitespace-pre-wrap border-l-2 border-slate-200 pl-3 text-[12px] leading-relaxed text-slate-500">
+                  <p className="mt-2 whitespace-pre-wrap border-l-2 border-slate-200 pl-3 text-[12px] leading-relaxed text-slate-500">
                     {turn.answer}
                   </p>
                 )}
-                {turn.feedback && <p className="mt-1.5 text-[11.5px] text-slate-500">{turn.feedback}</p>}
+                {turn.feedback && <p className="mt-2 text-[11.5px] leading-relaxed text-slate-500">{turn.feedback}</p>}
                 {(evaluation?.evidence || []).filter(item => item.quote).length > 0 && (
-                  <ul className="mt-1.5 space-y-0.5">
+                  <ul className="mt-2 space-y-1">
                     {(evaluation?.evidence || []).map((item, index) => (
-                      <li key={index} className="text-[11px] text-slate-400">
+                      <li key={index} className="text-[11px] leading-relaxed text-slate-400">
                         「{item.quote}」{item.note ? ` — ${item.note}` : ''}
                       </li>
                     ))}

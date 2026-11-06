@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ChevronLeft, Eye, Mic, Sparkles } from 'lucide-react'
 import { resumeApi } from '@/api/resume'
 import type { AnalysisView, Level, PointView, ResumeView } from '@/types/api'
 import { AnnotationCard } from '@/components/AnnotationCard'
@@ -191,19 +192,15 @@ export default function ResumePage() {
   }, [])
 
   if (loading) {
-    return (
-      <div className="flex min-h-full items-center justify-center">
-        <p className="text-sm text-slate-400">正在加载批注…</p>
-      </div>
-    )
+    return <p className="py-24 text-center text-sm text-slate-400">正在加载批注…</p>
   }
 
   if (error || !analysis) {
     return (
-      <div className="mx-auto max-w-lg px-6 py-24 text-center">
+      <div className="card mx-auto mt-16 max-w-lg p-10 text-center">
         <p className="text-sm text-slate-500">{error || '还没有分析结果'}</p>
-        <Link to="/" className="mt-4 inline-block text-sm font-medium text-slate-900 underline">
-          返回列表
+        <Link to="/resumes" className="btn-ghost mt-5">
+          返回简历库
         </Link>
       </div>
     )
@@ -212,38 +209,58 @@ export default function ResumePage() {
   const stats = analysis.stats
 
   return (
-    <div className="min-h-full pb-16">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-4 gap-y-2 px-6 py-3">
-          <Link to="/" className="text-xs text-slate-400 hover:text-slate-600">
-            ← 列表
+    <div className="-mx-10 -mt-10 pb-8">
+      <header className="sticky top-0 z-30 border-b border-slate-100 bg-white px-10 py-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <Link
+            to="/resumes"
+            className="flex shrink-0 items-center gap-1 text-xs text-slate-400 transition-colors hover:text-slate-600"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            简历库
           </Link>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-slate-900">{resume ? resume.fileName : `简历 #${resumeId}`}</p>
-            <p className="text-[11px] text-slate-400">
-              {stats.modules} 个模块 · {stats.points} 个小点 · 强 {stats.strong} / 中 {stats.medium} / 弱 {stats.weak}
+            <p className="truncate text-sm font-semibold text-slate-900">
+              {resume ? resume.fileName : `简历 #${resumeId}`}
             </p>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-500">{stats.modules} 个模块</span>
+              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-500">{stats.points} 个小点</span>
+              <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-emerald-600">强 {stats.strong}</span>
+              <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-600">中 {stats.medium}</span>
+              <span className="rounded-md bg-rose-50 px-1.5 py-0.5 text-rose-600">弱 {stats.weak}</span>
+              <span className="flex items-center gap-1 text-slate-400">
+                <Sparkles className="h-3 w-3" />
+                {analysis.modelName}
+              </span>
+            </div>
           </div>
-          <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-600">
-            <input
-              type="checkbox"
-              checked={onlyWeak}
-              onChange={event => setOnlyWeak(event.target.checked)}
-              className="h-3.5 w-3.5 rounded border-slate-300"
-            />
+          <button
+            onClick={() => setOnlyWeak(value => !value)}
+            className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
+              onlyWeak
+                ? 'border-rose-200 bg-rose-50 text-rose-600'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
             只看弱项
-          </label>
+          </button>
           <button
             onClick={() => navigate(`/interview/new?resumeId=${resumeId}`)}
-            className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+            className="btn-primary shrink-0"
           >
+            <Mic className="h-4 w-4" />
             模拟面试
           </button>
         </div>
       </header>
 
-      <div ref={containerRef} className="relative mx-auto grid max-w-[1280px] grid-cols-1 gap-6 px-6 pt-6 min-[1100px]:grid-cols-[minmax(0,1fr)_360px]">
-        <svg className="pointer-events-none absolute inset-0 hidden h-full w-full min-[1100px]:block" aria-hidden>
+      <div
+        ref={containerRef}
+        className="relative mx-auto grid max-w-[1280px] grid-cols-1 gap-6 px-10 pt-6 xl:grid-cols-[minmax(0,1fr)_320px] xl:gap-x-14"
+      >
+        <svg className="pointer-events-none absolute inset-0 hidden h-full w-full xl:block" aria-hidden>
           {connectors.map(connector => {
             const [start] = connector.d.split(' ')
             const [x, y] = start.slice(1).split(',')
@@ -280,9 +297,9 @@ export default function ResumePage() {
           />
         </div>
 
-        <aside className="flex flex-col gap-3">
+        <aside className="flex flex-col gap-3.5">
           {visiblePoints.length === 0 && (
-            <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-xs text-slate-400">
+            <p className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-8 text-center text-xs text-slate-400">
               {onlyWeak ? '没有弱项批注' : '这份简历还没有批注'}
             </p>
           )}

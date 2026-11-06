@@ -1,8 +1,10 @@
 import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useEffect } from 'react'
 import { getToken, setToken } from '@/api/client'
+import AppLayout from '@/components/AppLayout'
 import LoginPage from '@/pages/LoginPage'
 import UploadPage from '@/pages/UploadPage'
+import ResumeListPage from '@/pages/ResumeListPage'
 import ResumePage from '@/pages/ResumePage'
 import InterviewSetupPage from '@/pages/InterviewSetupPage'
 import InterviewPage from '@/pages/InterviewPage'
@@ -15,6 +17,14 @@ function Guard({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
   return <>{children}</>
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <Guard>
+      <AppLayout>{children}</AppLayout>
+    </Guard>
+  )
 }
 
 /** 仅开发环境：/dev-login?token=…&next=/resumes/1，用于截图与端到端冒烟。 */
@@ -40,49 +50,57 @@ export default function App() {
       <Route
         path="/"
         element={
-          <Guard>
+          <Shell>
             <UploadPage />
-          </Guard>
+          </Shell>
+        }
+      />
+      <Route
+        path="/resumes"
+        element={
+          <Shell>
+            <ResumeListPage />
+          </Shell>
         }
       />
       <Route
         path="/resumes/:id"
         element={
-          <Guard>
+          <Shell>
             <ResumePage />
-          </Guard>
+          </Shell>
         }
       />
       <Route
         path="/interview/new"
         element={
-          <Guard>
+          <Shell>
             <InterviewSetupPage />
-          </Guard>
+          </Shell>
         }
       />
       <Route
         path="/interview/:id"
         element={
-          <Guard>
+          <Shell>
             <InterviewPage />
-          </Guard>
+          </Shell>
         }
       />
       <Route
         path="/interview/:id/report"
         element={
-          <Guard>
+          <Shell>
             <ReportPage />
-          </Guard>
+          </Shell>
         }
       />
       <Route
         path="/history"
         element={
-          <Guard>
+          <Shell>
             <HistoryPage />
-          </Guard>
+          </Shell>
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />

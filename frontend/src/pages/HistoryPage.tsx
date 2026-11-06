@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { ChevronRight, Users } from 'lucide-react'
 import { interviewApi } from '@/api/interview'
 import type { InterviewSessionSummary } from '@/types/api'
 import { formatDate, scoreLabel, scoreTone } from '@/utils/format'
 
-const STATUS_LABEL: Record<InterviewSessionSummary['status'], string> = {
-  PLANNED: '待开始',
-  IN_PROGRESS: '进行中',
-  COMPLETED: '已完成',
-  FAILED: '异常'
+const STATUS_LABEL: Record<InterviewSessionSummary['status'], { text: string; className: string }> = {
+  PLANNED: { text: '待开始', className: 'bg-slate-100 text-slate-500' },
+  IN_PROGRESS: { text: '进行中', className: 'bg-amber-50 text-amber-600' },
+  COMPLETED: { text: '已完成', className: 'bg-emerald-50 text-emerald-600' },
+  FAILED: { text: '异常', className: 'bg-rose-50 text-rose-600' }
 }
 
 export default function HistoryPage() {
@@ -26,54 +27,66 @@ export default function HistoryPage() {
   }, [])
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-12">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">面试记录</h1>
-          <p className="mt-1 text-sm text-slate-500">每一场都保存了逐题评分与证据。</p>
-        </div>
-        <Link to="/" className="text-xs text-slate-400 hover:text-slate-600">
-          ← 简历列表
-        </Link>
+    <div className="mx-auto max-w-4xl">
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">面试记录</h1>
+        <p className="mt-1 text-sm text-slate-500">每一场都保存了逐题评分与证据，点开可以回看。</p>
       </div>
 
       {loading ? (
-        <p className="mt-8 text-sm text-slate-400">加载中…</p>
+        <p className="text-sm text-slate-400">加载中…</p>
       ) : error ? (
-        <p className="mt-8 text-sm text-rose-600">{error}</p>
+        <p className="text-sm text-rose-600">{error}</p>
       ) : items.length === 0 ? (
-        <p className="mt-8 text-sm text-slate-400">还没有面试记录，先去简历批注页点「模拟面试」。</p>
+        <div className="card flex flex-col items-center justify-center py-20">
+          <Users className="h-10 w-10 text-slate-300" />
+          <p className="mt-4 text-sm text-slate-500">还没有面试记录</p>
+          <p className="mt-1 text-xs text-slate-400">先去简历批注页点「模拟面试」</p>
+          <Link to="/resumes" className="btn-primary mt-6">
+            去简历库
+          </Link>
+        </div>
       ) : (
-        <ul className="mt-6 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          {items.map(item => {
+        <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-card">
+          {items.map((item, index) => {
+            const status = STATUS_LABEL[item.status]
             const done = item.status === 'COMPLETED'
             return (
-              <li
+              <button
                 key={item.id}
                 onClick={() => navigate(done ? `/interview/${item.id}/report` : `/interview/${item.id}`)}
-                className="flex cursor-pointer items-center gap-4 px-4 py-3.5 transition hover:bg-slate-50"
+                className={`flex w-full items-center gap-5 px-6 py-4 text-left transition-colors hover:bg-slate-50 ${
+                  index > 0 ? 'border-t border-slate-50' : ''
+                }`}
               >
-                <div className="w-14 shrink-0 text-center">
-                  <p className={`font-mono text-lg font-semibold ${scoreTone(item.overallScore)}`}>
+                <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-slate-50">
+                  <span className={`text-lg font-bold ${scoreTone(item.overallScore)}`}>
                     {item.overallScore ?? '—'}
-                  </p>
-                  <p className="text-[10px] text-slate-400">{scoreLabel(item.overallScore)}</p>
+                  </span>
+                  <span className="text-[10px] text-slate-400">{scoreLabel(item.overallScore)}</span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-slate-800">简历 #{item.resumeId}</p>
-                  <p className="mt-0.5 truncate text-[11.5px] text-slate-400">
-                    {item.summary || `${item.questionCount} 个主问题 · 追问上限 ${item.followUpLimit}`}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-900">简历 #{item.resumeId}</span>
+                    <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${status.className}`}>
+                      {status.text}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-slate-500">
+                    {item.summary || `${item.questionCount} 个主问题 · 每个最多追问 ${item.followUpLimit} 次`}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className="text-[11px] text-slate-500">{STATUS_LABEL[item.status]}</p>
-                  <p className="text-[10.5px] text-slate-400">{formatDate(item.createdAt)}</p>
+                  <p className="text-xs text-slate-400">{formatDate(item.createdAt)}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-300">
+                    {item.questionCount} 题 / 追问 {item.followUpLimit}
+                  </p>
                 </div>
-                <span className="shrink-0 text-slate-300">›</span>
-              </li>
+                <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+              </button>
             )
           })}
-        </ul>
+        </div>
       )}
     </div>
   )

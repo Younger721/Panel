@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Sparkles } from 'lucide-react'
 import { authApi } from '@/api/auth'
 import { setToken } from '@/api/client'
 
@@ -27,46 +28,41 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center px-6 py-16">
-      <div className="w-full max-w-sm">
-        <div className="mb-8">
-          <div className="text-2xl font-semibold tracking-tight text-slate-900">Nova</div>
+    <div className="flex min-h-screen items-center justify-center px-6">
+      <div className="w-full max-w-sm animate-fade-up">
+        <div className="mb-8 flex flex-col items-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 text-white shadow-lg shadow-primary-500/30">
+            <Sparkles className="h-7 w-7" />
+          </div>
+          <h1 className="mt-5 text-2xl font-bold tracking-tight text-slate-900">Nova AI</h1>
           <p className="mt-1 text-sm text-slate-500">简历批注 · 模拟面试</p>
         </div>
-        <form onSubmit={submit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+
+        <form onSubmit={submit} className="card space-y-4 p-7">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500">用户名</span>
+            <span className="mb-1.5 block text-xs font-medium text-slate-500">用户名</span>
             <input
               value={username}
               onChange={event => setUsername(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
               autoComplete="username"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-500">密码</span>
+            <span className="mb-1.5 block text-xs font-medium text-slate-500">密码</span>
             <input
               type="password"
               value={password}
               onChange={event => setPassword(event.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-100"
               autoComplete="current-password"
             />
           </label>
           {error && <p className="text-xs text-rose-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading || !password}
-            className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-40"
-          >
+          <button type="submit" disabled={loading || !password} className="btn-primary w-full py-3">
             {loading ? '登录中…' : '登录'}
           </button>
         </form>
-        <p className="mt-4 text-center text-xs text-slate-400">
-          <Link to="/" className="hover:text-slate-600">
-            返回首页
-          </Link>
-        </p>
       </div>
     </div>
   )
