@@ -151,7 +151,8 @@ export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] 
     // 项目符号：并入下一行
     if (BULLETS.has(text) && i + 1 < lines.length) {
       const next = lines[i + 1]
-      push(next, `• ${next.text.replace(/\s+/g, ' ').trim()}`)
+      // 只把「• 」补到第一段前面：这一行可能被切成中文/英文两段，整行再拼一次会重字
+      push(next, '• ')
       previous = next
       i += 1
       continue
