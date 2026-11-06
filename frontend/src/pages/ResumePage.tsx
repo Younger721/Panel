@@ -122,6 +122,20 @@ export default function ResumePage() {
     }
   }, [])
 
+  // 句子与卡片之间隔着 44px 走线区，收起延迟 160ms，避免来回移动时闪断
+  const leaveTimer = useRef<number | null>(null)
+  const setHover = useCallback((id: string | null) => {
+    if (leaveTimer.current !== null) {
+      window.clearTimeout(leaveTimer.current)
+      leaveTimer.current = null
+    }
+    if (id === null) {
+      leaveTimer.current = window.setTimeout(() => setHovered(null), 160)
+      return
+    }
+    setHovered(id)
+  }, [])
+
   /**
    * 批注卡按原文的纵向位置摆放：悬浮哪一句，右边就在对应那一行展开。
    * 位置相近的卡片允许重叠（最小步进 46px，只露标题条），避免挤成一片。
@@ -309,7 +323,7 @@ export default function ResumePage() {
               blocks={analysis.blocks}
               anchors={anchors}
               hoveredId={hovered}
-              onHover={setHovered}
+              onHover={setHover}
               registerMark={registerMark}
             />
           </div>
@@ -328,7 +342,7 @@ export default function ResumePage() {
                 index={index + 1}
                 active={hovered === item.point.id}
                 top={tops[item.point.id] ?? 0}
-                onHover={setHovered}
+                onHover={setHover}
                 register={registerCard}
                 onFocusPoint={focusPoint}
               />
@@ -347,7 +361,7 @@ export default function ResumePage() {
               active
               layered={false}
               top={0}
-              onHover={setHovered}
+              onHover={setHover}
               register={registerCard}
               onFocusPoint={focusPoint}
             />
