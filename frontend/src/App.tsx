@@ -10,6 +10,7 @@ import InterviewSetupPage from '@/pages/InterviewSetupPage'
 import InterviewPage from '@/pages/InterviewPage'
 import ReportPage from '@/pages/ReportPage'
 import HistoryPage from '@/pages/HistoryPage'
+import ResumeEditorPage from '@/pages/ResumeEditorPage'
 
 function Guard({ children }: { children: React.ReactNode }) {
   const location = useLocation()
@@ -68,6 +69,14 @@ export default function App() {
         element={
           <Shell>
             <ResumePage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/resume-editor"
+        element={
+          <Shell>
+            <ResumeEditorPage />
           </Shell>
         }
       />

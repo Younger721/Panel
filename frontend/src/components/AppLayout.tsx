@@ -5,6 +5,7 @@ import {
   FileStack,
   LogOut,
   MessageSquare,
+  PenLine,
   Sparkles,
   Upload,
   Users
@@ -17,6 +18,7 @@ interface NavItem {
   description: string
   icon: React.ComponentType<{ className?: string }>
   disabled?: boolean
+  external?: boolean
 }
 
 const NAV_GROUPS: { id: string; title: string; items: NavItem[] }[] = [
@@ -26,6 +28,12 @@ const NAV_GROUPS: { id: string; title: string; items: NavItem[] }[] = [
     items: [
       { path: '/', label: '上传简历', description: 'AI 分析简历', icon: Upload },
       { path: '/resumes', label: '简历库', description: '管理所有简历', icon: FileStack },
+      {
+        path: '/resume-editor',
+        label: '简历编辑器',
+        description: '动态修改与排版',
+        icon: PenLine
+      },
       { path: '/history', label: '面试记录', description: '查看面试历史', icon: Users }
     ]
   },
@@ -55,6 +63,8 @@ function isActive(path: string, current: string) {
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
+  // 编辑器是自带顶栏与画布的全屏应用，宿主只留侧栏，不给内边距
+  const fullBleed = location.pathname.startsWith('/resume-editor')
 
   return (
     <div className="flex min-h-screen">
@@ -80,7 +90,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="space-y-1">
                   {group.items.map(item => {
-                    const active = !item.disabled && isActive(item.path, location.pathname)
+                    const active = !item.disabled && !item.external && isActive(item.path, location.pathname)
                     const Icon = item.icon
                     if (item.disabled) {
                       return (
@@ -99,16 +109,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         </div>
                       )
                     }
-                    return (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200 ${
-                          active
-                            ? 'bg-primary-50 text-primary-600'
-                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                        }`}
-                      >
+                    const className = `group relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200 ${
+                      active
+                        ? 'bg-primary-50 text-primary-600'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`
+                    const content = (
+                      <>
                         <div
                           className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
                             active
@@ -125,6 +132,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                           <span className="block truncate text-xs text-slate-400">{item.description}</span>
                         </div>
                         {active && <ChevronRight className="h-4 w-4 text-primary-400" />}
+                      </>
+                    )
+                    if (item.external) {
+                      return (
+                        <a
+                          key={item.path}
+                          href={item.path}
+                          className={className}
+                          title={`${item.label} · ${item.description}`}
+                        >
+                          {content}
+                        </a>
+                      )
+                    }
+                    return (
+                      <Link key={item.path} to={item.path} className={className}>
+                        {content}
                       </Link>
                     )
                   })}
@@ -152,7 +176,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <main key={location.pathname} className="ml-64 min-h-screen flex-1 animate-fade-up p-10">
+      <main
+        key={location.pathname}
+        className={
+          fullBleed ? 'ml-64 h-screen flex-1 overflow-hidden bg-white' : 'ml-64 min-h-screen flex-1 animate-fade-up p-10'
+        }
+      >
         {children}
       </main>
     </div>
