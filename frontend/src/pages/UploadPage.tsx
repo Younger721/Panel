@@ -89,9 +89,14 @@ export default function UploadPage() {
           <h1 className="text-xl font-semibold tracking-tight text-slate-900">简历批注</h1>
           <p className="mt-1 text-sm text-slate-500">上传 PDF / Word / TXT，自动切成模块并逐条批注。</p>
         </div>
-        <button onClick={() => void refresh()} className="text-xs text-slate-400 hover:text-slate-600">
-          刷新
-        </button>
+        <div className="flex items-center gap-4">
+          <Link to="/history" className="text-xs text-slate-500 hover:text-slate-900">
+            面试记录
+          </Link>
+          <button onClick={() => void refresh()} className="text-xs text-slate-400 hover:text-slate-600">
+            刷新
+          </button>
+        </div>
       </header>
 
       <div

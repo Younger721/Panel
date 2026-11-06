@@ -4,7 +4,18 @@ import { getToken, setToken } from '@/api/client'
 import LoginPage from '@/pages/LoginPage'
 import UploadPage from '@/pages/UploadPage'
 import ResumePage from '@/pages/ResumePage'
-import PlaceholderPage from '@/pages/PlaceholderPage'
+import InterviewSetupPage from '@/pages/InterviewSetupPage'
+import InterviewPage from '@/pages/InterviewPage'
+import ReportPage from '@/pages/ReportPage'
+import HistoryPage from '@/pages/HistoryPage'
+
+function Guard({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
+  if (!getToken()) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  }
+  return <>{children}</>
+}
 
 /** 仅开发环境：/dev-login?token=…&next=/resumes/1，用于截图与端到端冒烟。 */
 function DevLogin() {
@@ -19,14 +30,6 @@ function DevLogin() {
     navigate(next, { replace: true })
   }, [token, next, navigate])
   return null
-}
-
-function Guard({ children }: { children: React.ReactNode }) {
-  const location = useLocation()
-  if (!getToken()) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
-  }
-  return <>{children}</>
 }
 
 export default function App() {
@@ -51,13 +54,26 @@ export default function App() {
         }
       />
       <Route
-        path="/interview/*"
+        path="/interview/new"
         element={
           <Guard>
-            <PlaceholderPage
-              title="模拟面试"
-              detail="面试页与报告页在 T9/T10 实现，后端接口已就绪（POST /sessions、POST /sessions/{id}/answers）。"
-            />
+            <InterviewSetupPage />
+          </Guard>
+        }
+      />
+      <Route
+        path="/interview/:id"
+        element={
+          <Guard>
+            <InterviewPage />
+          </Guard>
+        }
+      />
+      <Route
+        path="/interview/:id/report"
+        element={
+          <Guard>
+            <ReportPage />
           </Guard>
         }
       />
@@ -65,10 +81,7 @@ export default function App() {
         path="/history"
         element={
           <Guard>
-            <PlaceholderPage
-              title="面试历史"
-              detail="历史列表接口已就绪（GET /sessions），页面在 T10 实现。"
-            />
+            <HistoryPage />
           </Guard>
         }
       />

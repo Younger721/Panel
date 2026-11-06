@@ -85,6 +85,44 @@ export interface InterviewSessionView {
   turns: InterviewTurnView[]
 }
 
+export interface TurnScores {
+  accuracy: number
+  depth: number
+  completeness: number
+  clarity: number
+}
+
+export interface TurnEvidence {
+  quote: string
+  note?: string | null
+}
+
+export interface TurnEvaluation {
+  scores?: TurnScores | null
+  evidence?: TurnEvidence[] | null
+  deductions?: string[] | null
+  feedback?: string | null
+  answered?: boolean | null
+}
+
+export interface SkillScore {
+  skill: string
+  score: number
+  comment: string
+}
+
+export interface InterviewReport {
+  summary?: string
+  strengths?: string[]
+  improvements?: string[]
+  skillScores?: SkillScore[]
+}
+
+export interface ReportPayload {
+  report: InterviewReport
+  overallScore: number
+}
+
 export interface InterviewTurnView {
   seq: number
   kind: 'MAIN' | 'FOLLOW_UP'
@@ -96,7 +134,7 @@ export interface InterviewTurnView {
   answer: string | null
   score: number | null
   feedback: string | null
-  evaluation: unknown
+  evaluation: TurnEvaluation | null
   review: unknown
   followUps: string[]
 }
@@ -117,7 +155,7 @@ export interface InterviewAnswerResult {
   nextQuestion: InterviewQuestionView | null
   status: InterviewSessionView['status']
   overallScore: number | null
-  report: unknown
+  report: ReportPayload | null
 }
 
 export interface InterviewSessionSummary {
