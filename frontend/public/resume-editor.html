@@ -1669,7 +1669,8 @@ input[type="color"] {
   /**
    * 纯文本视图，用于回写后端。
    * 不用 innerText：它会把编辑器的装饰节点也带上，而且依赖布局信息。
-   * 要点前面带 "- "，后端文本解析器认这个前缀，能还原成列表。
+   * 要点不加 "- " 前缀：后端文本解析器不认这个前缀，会把短横线当成正文留下来，
+   * 再进编辑器就成了 "- - 内容"。
    */
   function resumePlainText() {
     var lines = [];
@@ -1691,7 +1692,7 @@ input[type="color"] {
           if (sub) { lines.push(sub); }
           entry.querySelectorAll('[data-role="bullet"]').forEach(function (item) {
             var value = text(item);
-            if (value) { lines.push('- ' + value); }
+            if (value) { lines.push(value); }
           });
         });
       } else {
@@ -1701,7 +1702,7 @@ input[type="color"] {
         });
         section.querySelectorAll('[data-role="bullet"]').forEach(function (node) {
           var value = text(node);
-          if (value) { lines.push('- ' + value); }
+          if (value) { lines.push(value); }
         });
       }
     });

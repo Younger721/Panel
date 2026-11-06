@@ -43,6 +43,8 @@ const DATE_TOKEN = '(?:19|20)\\d{2}\\s*[年.\\-/]\\s*\\d{1,2}\\s*月?'
 const DATE_RANGE = `${DATE_TOKEN}(?:\\s*[-–—~至到]\\s*(?:${DATE_TOKEN}|至今|现在|今))?`
 const DATE_PREFIX = new RegExp(`^(${DATE_RANGE})\\s+(.+)$`)
 const DATE_IN_PARENS = new RegExp(`^(.+?)\\s*[（(]\\s*(${DATE_RANGE})\\s*[)）]\\s*$`)
+/** 日期落在行尾：「某公司 · 后端工程师  2022.07 – 至今」 */
+const TRAILING_DATE = new RegExp(`^(.+?)\\s+(${DATE_RANGE})$`)
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] as string)
@@ -50,6 +52,11 @@ function escapeHtml(value: string): string {
 
 function tidy(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/^[\s·|｜,，、:：-]+/, '').trim()
+}
+
+/** 标题两头的分隔符也要剪掉：「某公司 · 后端工程师 ·」→「某公司 · 后端工程师」 */
+function tidyTitle(value: string): string {
+  return tidy(value).replace(/[\s·|｜,，、:：-]+$/, '')
 }
 
 /** PDF 抽出来的字之间常带空格（「性 别： 男」），把中文字符之间的空白合并掉 */
@@ -73,12 +80,18 @@ function splitEntryTitle(text: string): { meta: string; title: string } {
   const plain = text.trim().replace(/\s{2,}/g, ' · ')
   const matched = DATE_PREFIX.exec(plain)
   if (matched && tidy(matched[2])) {
-    return { meta: normalizeRange(matched[1]), title: tidy(matched[2]) }
+    return { meta: normalizeRange(matched[1]), title: tidyTitle(matched[2]) }
   }
   // 「Nova AI 智能面试平台（2024.03-至今）」这类把时间写在括号里的
   const inParens = DATE_IN_PARENS.exec(plain)
   if (inParens && tidy(inParens[1])) {
-    return { meta: normalizeRange(inParens[2]), title: tidy(inParens[1]) }
+    return { meta: normalizeRange(inParens[2]), title: tidyTitle(inParens[1]) }
+  }
+  // 「某公司 · 后端工程师  2022.07 – 至今」——从编辑器存回去的文本就是这种顺序，
+  // 日期在末尾。不认的话每存一次日期就多沉在标题里一层。
+  const trailing = TRAILING_DATE.exec(plain)
+  if (trailing && tidy(trailing[2])) {
+    return { meta: normalizeRange(trailing[2]), title: tidyTitle(trailing[1]) }
   }
   return { meta: '', title: plain }
 }
@@ -205,7 +218,8 @@ export function buildEditorDocument(blocks: Block[]): EditorDocument {
         break
       }
       if (!headline && compact.length <= 32 && !/^(19|20)\d{2}/.test(compact)) {
-        headline = compact
+        // 求职意向保留词间空格（"Java 后端开发工程师 · 4 年经验"），只有姓名需要去掉
+        headline = text
         queue.shift()
         continue
       }
@@ -243,11 +257,15 @@ export function buildEditorDocument(blocks: Block[]): EditorDocument {
         current = startSection(rule.type, text)
         continue
       }
-      if (current && ENTRY_TYPES.has(current.type) && DATE_PREFIX.test(block.text.trim())) {
-        const { meta, title } = splitEntryTitle(block.text)
-        if (title) {
-          current.entries.push({ title, meta, bullets: [] })
-          continue
+      if (current && ENTRY_TYPES.has(current.type)) {
+        const raw = block.text.trim()
+        // 日期开头（原始简历）或日期结尾（从编辑器存回来的）都算一条经历
+        if (DATE_PREFIX.test(raw) || (raw.length <= 48 && TRAILING_DATE.test(raw))) {
+          const { meta, title } = splitEntryTitle(block.text)
+          if (title) {
+            current.entries.push({ title, meta, bullets: [] })
+            continue
+          }
         }
       }
     }
