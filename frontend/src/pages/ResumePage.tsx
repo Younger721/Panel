@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, Eye, Mic, Sparkles } from 'lucide-react'
+import { ChevronLeft, Eye, Mic, PenLine, Sparkles } from 'lucide-react'
 import { resumeApi } from '@/api/resume'
 import type { AnalysisView, Level, PointView, ResumeView } from '@/types/api'
 import { AnnotationCard } from '@/components/AnnotationCard'
@@ -286,6 +286,14 @@ export default function ResumePage() {
             <Eye className="h-3.5 w-3.5" />
             只看弱项
           </button>
+          <Link
+            to={`/resume-editor/${resumeId}`}
+            className="btn-ghost shrink-0 border border-slate-200 text-slate-600"
+            title="在编辑器里按批注修改"
+          >
+            <PenLine className="h-4 w-4" />
+            编辑
+          </Link>
           <button onClick={() => navigate(`/interview/new?resumeId=${resumeId}`)} className="btn-primary shrink-0">
             <Mic className="h-4 w-4" />
             模拟面试

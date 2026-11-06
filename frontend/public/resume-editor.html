@@ -1287,6 +1287,8 @@ input[type="color"] {
    * 数据与常量
    * ================================================================ */
   var STORAGE_KEY = 'nova-resume-editor:v1';
+  // 从简历库打开时按简历分键保存，避免覆盖编辑器自己的草稿
+  var activeKey = STORAGE_KEY;
   var MAX_HISTORY = 60;
 
   var FONTS = {
@@ -1706,7 +1708,7 @@ input[type="color"] {
 
   function loadSaved() {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
+      var raw = localStorage.getItem(activeKey);
       if (!raw) { return null; }
       var data = JSON.parse(raw);
       if (!data || typeof data.html !== 'string') { return null; }
@@ -1961,7 +1963,7 @@ input[type="color"] {
 
   function saveNow() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(buildState()));
+      localStorage.setItem(activeKey, JSON.stringify(buildState()));
       setSaveState('saved');
     } catch (err) {
       setSaveState('error');
@@ -2796,6 +2798,26 @@ input[type="color"] {
   }
 
   /* ================================================================
+   * 工作台桥接：被 /resume-editor/:id 内嵌时，父页面把简历文档推进来
+   * ================================================================ */
+  function bindHostBridge() {
+    if (!document.documentElement.classList.contains('embed')) { return; }
+    var origin = location.origin;
+    window.addEventListener('message', function (event) {
+      if (event.origin !== origin) { return; }
+      var data = event.data || {};
+      if (data.type !== 'nova:editor:load' || !data.document || typeof data.document.html !== 'string') { return; }
+      if (typeof data.storageKey === 'string' && data.storageKey) { activeKey = data.storageKey; }
+      if (!data.document.html) { toast('这份简历没有解析出正文，请重新上传'); return; }
+      applyDocument(data.document, { resetHistory: true });
+      activeKey = data.storageKey || activeKey;
+      saveNow();
+      toast('已载入简历：' + resumeName());
+    });
+    try { window.parent.postMessage({ type: 'nova:editor:ready' }, origin); } catch (err) { /* ignore */ }
+  }
+
+  /* ================================================================
    * 初始化
    * ================================================================ */
   function init() {
@@ -2804,6 +2826,7 @@ input[type="color"] {
     bindChrome();
     bindKeys();
     bindResize();
+    bindHostBridge();
 
     var saved = loadSaved();
     applyDocument(saved || { html: DEFAULT_HTML, global: DEFAULT_GLOBAL }, { resetHistory: true });

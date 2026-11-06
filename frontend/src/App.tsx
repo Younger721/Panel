@@ -81,6 +81,14 @@ export default function App() {
         }
       />
       <Route
+        path="/resume-editor/:resumeId"
+        element={
+          <Shell>
+            <ResumeEditorPage />
+          </Shell>
+        }
+      />
+      <Route
         path="/interview/new"
         element={
           <Shell>

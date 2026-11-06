@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AlertCircle, ArrowRight, FileStack, FileText, Loader2, Plus } from 'lucide-react'
+import { AlertCircle, ArrowRight, FileStack, FileText, Loader2, PenLine, Plus } from 'lucide-react'
 import { resumeApi } from '@/api/resume'
 import type { ResumeStatus, ResumeView } from '@/types/api'
 import { formatDate } from '@/utils/format'
@@ -48,7 +48,9 @@ export default function ResumeListPage() {
       <div className="mb-8 flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">简历库</h1>
-          <p className="mt-1 text-sm text-slate-500">所有上传过的简历，点开可以看逐条批注。</p>
+          <p className="mt-1 text-sm text-slate-500">
+            选一份简历看逐条批注，或者直接进编辑器改排版、改措辞。
+          </p>
         </div>
         <Link to="/" className="btn-primary">
           <Plus className="h-4 w-4" />
@@ -76,43 +78,63 @@ export default function ResumeListPage() {
             const working =
               item.status === 'PENDING' || item.status === 'PARSING' || item.status === 'ANALYZING'
             return (
-              <button
+              <div
                 key={item.id}
-                onClick={() => ready && navigate(`/resumes/${item.id}`)}
-                disabled={!ready}
-                className={`card group flex flex-col items-start p-5 text-left transition-all duration-200 ${
-                  ready ? 'hover:-translate-y-0.5 hover:shadow-card-hover' : 'cursor-default'
+                className={`card flex flex-col p-5 transition-all duration-200 ${
+                  ready ? 'hover:-translate-y-0.5 hover:shadow-card-hover' : ''
                 }`}
               >
-                <div className="mb-4 flex w-full items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
-                    {working ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileText className="h-5 w-5" />}
+                <button
+                  type="button"
+                  onClick={() => ready && navigate(`/resumes/${item.id}`)}
+                  disabled={!ready}
+                  className={`w-full text-left ${ready ? 'cursor-pointer' : 'cursor-default'}`}
+                >
+                  <div className="mb-4 flex w-full items-start justify-between">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
+                      {working ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileText className="h-5 w-5" />}
+                    </div>
+                    <span className={`rounded-lg px-2 py-1 text-xs font-medium ${meta.className}`}>{meta.label}</span>
                   </div>
-                  <span className={`rounded-lg px-2 py-1 text-xs font-medium ${meta.className}`}>{meta.label}</span>
-                </div>
-                <p className="w-full truncate font-semibold text-slate-900">{item.fileName}</p>
-                <p className="mt-1 text-xs text-slate-400">#{item.id} · {formatDate(item.createdAt)}</p>
-
-                {item.status === 'FAILED' && item.lastError && (
-                  <p className="mt-3 flex items-start gap-1.5 text-xs text-rose-600">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span className="line-clamp-2">{item.lastError}</span>
+                  <p className="w-full truncate font-semibold text-slate-900">{item.fileName}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    #{item.id} · {formatDate(item.createdAt)}
                   </p>
-                )}
 
-                <div className="mt-4 flex w-full items-center gap-3 border-t border-slate-50 pt-3 text-xs text-slate-400">
+                  {item.status === 'FAILED' && item.lastError && (
+                    <p className="mt-3 flex items-start gap-1.5 text-xs text-rose-600">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span className="line-clamp-2">{item.lastError}</span>
+                    </p>
+                  )}
+                </button>
+
+                <div className="mt-4 flex w-full items-center gap-2 border-t border-slate-50 pt-3 text-xs text-slate-400">
                   {item.hasProfile && item.yearsOfExperience !== null && (
                     <span>{item.yearsOfExperience} 年经验</span>
                   )}
                   {item.hasProfile && item.skillCount !== null && <span>{item.skillCount} 项技能</span>}
+
                   {ready && (
-                    <span className="ml-auto flex items-center gap-1 font-medium text-primary-600">
-                      查看批注
-                      <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                    </span>
+                    <div className="ml-auto flex items-center gap-1">
+                      <Link
+                        to={`/resume-editor/${item.id}`}
+                        className="flex items-center gap-1 rounded-lg px-2 py-1 font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                      >
+                        <PenLine className="h-3.5 w-3.5" />
+                        编辑
+                      </Link>
+                      <Link
+                        to={`/resumes/${item.id}`}
+                        className="flex items-center gap-1 rounded-lg px-2 py-1 font-medium text-primary-600 transition-colors hover:bg-primary-50"
+                      >
+                        查看批注
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
                   )}
                 </div>
-              </button>
+              </div>
             )
           })}
         </div>
