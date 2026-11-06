@@ -84,8 +84,11 @@ public class ResumePreviewService {
                     .map(info -> new PageView(info.index(), info.width(), info.height()))
                     .toList();
             List<SectionView> sections = pdf.sections().stream()
-                    .map(section -> new SectionView(section.index(), section.page(), section.title(),
-                            round(section.x()), round(section.y()), round(section.width()), round(section.height()),
+                    .map(section -> new SectionView(section.index(), section.title(),
+                            section.parts().stream()
+                                    .map(part -> new PartView(part.page(), round(part.x()), round(part.y()),
+                                            round(part.width()), round(part.height())))
+                                    .toList(),
                             section.lines().stream()
                                     .map(line -> new LineView(line.page(), line.text(),
                                             round(line.x()), round(line.y()), round(line.width()), round(line.height()),
@@ -215,13 +218,15 @@ public class ResumePreviewService {
     public record PreviewView(boolean available, String reason, List<PageView> pages) {
     }
 
-    /** 可原位编辑的文字层：整块（板块）为单位，而不是一行一行。 */
+    /** 可整体编辑的文字层：一块 = 一个板块，跨页的板块有多个 part。 */
     public record TextLayerView(boolean available, String reason, List<PageView> pages,
                                 List<SectionView> sections, Map<String, String> edits) {
     }
 
-    public record SectionView(int index, int page, String title, float x, float y, float width, float height,
-                              List<LineView> lines) {
+    public record SectionView(int index, String title, List<PartView> parts, List<LineView> lines) {
+    }
+
+    public record PartView(int page, float x, float y, float width, float height) {
     }
 
     public record LineView(int page, String text, float x, float y, float width, float height, float size) {

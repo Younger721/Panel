@@ -303,19 +303,22 @@ public final class PdfPreview implements AutoCloseable {
     }
 
     /**
-     * 按板块切好的文字区域：前端一块一块地编辑（点「实习经历」整块变成富文本框）。
+     * 按板块切好的文字区域：前端一块一块地编辑（点「实习经历」整块打开编辑框）。
      *
      * <p>切法：用板块标题当分隔符。第一个标题之前的部分算"个人信息"（姓名、电话、
      * 照片旁的那几行）；每个标题到下一个标题之间算一块。没有标题的页面整页算一块，
      * 这样任何简历都至少有一个可编辑的区域。</p>
+     *
+     * <p><b>跨页要接回去</b>：上一页写到一半的板块，下一页开头那几行没有标题，
+     * 不能单独成块——直接把这几行并进上一块，块里就有了两个 {@link Part}（两页各一段）。
+     * 否则「实习经历」会被切成"正文一块 + 接上页一块"，用户点哪块都改不全。</p>
      */
     public List<SectionBox> sections() {
         if (sections != null) {
             return sections;
         }
         List<LineBox> lines = textLines();
-        List<SectionBox> result = new ArrayList<>();
-        int index = 0;
+        List<Draft> drafts = new ArrayList<>();
         for (PageInfo page : pages) {
             List<LineBox> pageLines = new ArrayList<>();
             for (LineBox line : lines) {
@@ -335,37 +338,61 @@ public final class PdfPreview implements AutoCloseable {
                 }
             }
 
-            List<int[]> ranges = new ArrayList<>();
-            if (headingAt.isEmpty()) {
-                ranges.add(new int[]{0, pageLines.size(), -1});
-            } else {
-                if (headingAt.get(0) > 0) {
-                    ranges.add(new int[]{0, headingAt.get(0), -1});
-                }
-                for (int i = 0; i < headingAt.size(); i++) {
-                    int start = headingAt.get(i);
-                    int end = i + 1 < headingAt.size() ? headingAt.get(i + 1) : pageLines.size();
-                    ranges.add(new int[]{start, end, start});
+            int headEnd = headingAt.isEmpty() ? pageLines.size() : headingAt.get(0);
+            if (headEnd > 0) {
+                Draft previous = drafts.isEmpty() ? null : drafts.get(drafts.size() - 1);
+                if (previous != null) {
+                    // 这一页开头没有标题 → 是上一页那一块的续写
+                    previous.ranges.add(new Range(page, pageLines.subList(0, headEnd), true));
+                } else {
+                    drafts.add(new Draft(page.index() == 1 ? "个人信息" : "全部内容",
+                            page, pageLines.subList(0, headEnd), true));
                 }
             }
+            for (int i = 0; i < headingAt.size(); i++) {
+                int start = headingAt.get(i);
+                int end = i + 1 < headingAt.size() ? headingAt.get(i + 1) : pageLines.size();
+                drafts.add(new Draft(headingOf(pageLines.get(start)), page,
+                        pageLines.subList(start, end), false));
+            }
+        }
 
-            for (int[] range : ranges) {
-                List<LineBox> sectionLines = pageLines.subList(range[0], range[1]);
-                if (sectionLines.isEmpty()) {
-                    continue;
-                }
-                boolean untitled = range[2] < 0;
-                String title = untitled
-                        ? (page.index() == 1 ? "个人信息" : "接上页")
-                        : headingOf(pageLines.get(range[2]));
-                result.add(box(index++, page, title, untitled, sectionLines));
+        List<SectionBox> result = new ArrayList<>();
+        int index = 0;
+        for (Draft draft : drafts) {
+            List<Part> parts = new ArrayList<>();
+            List<LineBox> sectionLines = new ArrayList<>();
+            for (Range range : draft.ranges) {
+                sectionLines.addAll(range.lines());
+                List<LineBox> sorted = new ArrayList<>(range.lines());
+                sorted.sort(Comparator.comparingDouble(LineBox::y).thenComparingDouble(LineBox::x));
+                parts.add(part(range.page(), sorted, range.untitled()));
             }
+            result.add(new SectionBox(index++, draft.title, List.copyOf(parts), List.copyOf(sectionLines)));
         }
         sections = List.copyOf(result);
         return sections;
     }
 
-    private static SectionBox box(int index, PageInfo page, String title, boolean untitled, List<LineBox> lines) {
+    /** 一块在一页上占的区域；跨页的板块有多个。 */
+    public record Part(int page, float x, float y, float width, float height) {
+    }
+
+    private record Range(PageInfo page, List<LineBox> lines, boolean untitled) {
+    }
+
+    /** 切块过程中的一块：标题 + 若干段（跨页时多段），每段对应一页上的一块矩形。 */
+    private static final class Draft {
+        private final String title;
+        private final List<Range> ranges = new ArrayList<>();
+
+        private Draft(String title, PageInfo page, List<LineBox> lines, boolean untitled) {
+            this.title = title;
+            this.ranges.add(new Range(page, lines, untitled));
+        }
+    }
+
+    private static Part part(PageInfo page, List<LineBox> lines, boolean untitled) {
         float minX = Float.MAX_VALUE;
         float minY = Float.MAX_VALUE;
         float maxX = -Float.MAX_VALUE;
@@ -376,7 +403,7 @@ public final class PdfPreview implements AutoCloseable {
             maxX = Math.max(maxX, line.x() + line.width());
             maxY = Math.max(maxY, line.y() + line.height());
         }
-        // 没有标题的那块（页首的姓名/联系方式、或上一页写不完的尾巴）只框住文字本身：
+        // 没有标题的那段（页首姓名/联系方式、跨页续写）只框住文字本身：
         // 照片、校徽、色块都在同一片区域，整块盖掉会把这些装饰一起抹了
         float left = untitled ? Math.max(0f, minX - 6f) : 24f;
         float right = untitled
@@ -384,7 +411,7 @@ public final class PdfPreview implements AutoCloseable {
                 : Math.max(page.width() - 24f, maxX + 6f);
         float top = Math.max(0f, minY - 6f);
         float bottom = Math.min(page.height(), maxY + 8f);
-        return new SectionBox(index, page.index(), title, left, top, right - left, bottom - top, List.copyOf(lines));
+        return new Part(page.index(), left, top, right - left, bottom - top);
     }
 
     /** 标题行返回归一化后的标题文字，否则返回 null。 */
@@ -482,10 +509,10 @@ public final class PdfPreview implements AutoCloseable {
      * 一块可整体编辑的区域（板块）。
      *
      * @param index 全局顺序，前端用它当"这块被改过"的键
-     * @param title 板块标题，如「实习经历」；头部那块是「个人信息」
+     * @param title 板块标题，如「实习经历」；页首那块是「个人信息」
+     * @param parts 这一块在页面上占的区域，跨页的板块有多段
      */
-    public record SectionBox(int index, int page, String title,
-                             float x, float y, float width, float height, List<LineBox> lines) {
+    public record SectionBox(int index, String title, List<Part> parts, List<LineBox> lines) {
     }
 
     public record Rect(float x, float y, float width, float height) {

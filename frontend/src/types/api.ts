@@ -96,15 +96,20 @@ export interface TextLine {
   size: number
 }
 
-/** 一块可整体编辑的板块（实习经历、教育背景……） */
-export interface TextSection {
-  index: number
+/** 板块在某一页上占的矩形（跨页的板块有多段） */
+export interface TextPart {
   page: number
-  title: string
   x: number
   y: number
   width: number
   height: number
+}
+
+/** 一块可整体编辑的板块（实习经历、教育背景……） */
+export interface TextSection {
+  index: number
+  title: string
+  parts: TextPart[]
   lines: TextLine[]
 }
 

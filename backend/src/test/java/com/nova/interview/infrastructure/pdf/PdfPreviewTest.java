@@ -148,20 +148,22 @@ class PdfPreviewTest {
             int index = 0;
             for (PdfPreview.SectionBox section : sections) {
                 assertEquals(index++, section.index(), "序号要连续，前端拿它当键");
-                assertEquals(1, section.page());
-                assertTrue(section.width() > 100f, "板块宽度: " + section.width());
-                assertTrue(section.height() > 10f, "板块高度: " + section.height());
-                assertTrue(section.x() >= 0f && section.x() + section.width() <= page.width() + 1f, "横向越界");
-                assertTrue(section.y() >= 0f && section.y() + section.height() <= page.height() + 1f, "纵向越界");
+                assertEquals(1, section.parts().size(), "单页里的板块只有一段");
+                PdfPreview.Part part = section.parts().get(0);
+                assertEquals(1, part.page());
+                assertTrue(part.width() > 100f, "板块宽度: " + part.width());
+                assertTrue(part.height() > 10f, "板块高度: " + part.height());
+                assertTrue(part.x() >= 0f && part.x() + part.width() <= page.width() + 1f, "横向越界");
+                assertTrue(part.y() >= 0f && part.y() + part.height() <= page.height() + 1f, "纵向越界");
                 assertTrue(!section.lines().isEmpty(), "板块里必须有文字");
             }
 
             // 三块要按页面上下的顺序排，且互不重叠
             for (int i = 1; i < sections.size(); i++) {
-                PdfPreview.SectionBox previous = sections.get(i - 1);
-                PdfPreview.SectionBox current = sections.get(i);
+                PdfPreview.Part previous = sections.get(i - 1).parts().get(0);
+                PdfPreview.Part current = sections.get(i).parts().get(0);
                 assertTrue(current.y() >= previous.y() + previous.height() - 1f,
-                        "板块应当自上而下不重叠: " + previous.title() + " / " + current.title());
+                        "板块应当自上而下不重叠: " + sections.get(i - 1).title() + " / " + sections.get(i).title());
             }
 
             // 标题行本身属于它下面那一块
@@ -172,7 +174,37 @@ class PdfPreviewTest {
             // 页首那块只框文字，别把版头装饰一起盖住
             PdfPreview.SectionBox header = sections.get(0);
             assertEquals("个人信息", header.title());
-            assertTrue(header.width() < page.width() - 40f, "页首块的宽度应当贴合文字: " + header.width());
+            assertTrue(header.parts().get(0).width() < page.width() - 40f,
+                    "页首块的宽度应当贴合文字: " + header.parts().get(0).width());
+        }
+    }
+
+    /**
+     * 跨页的板块要接回去：上一页写到一半，下一页开头那几行没有标题，不能单独成块。
+     *
+     * <p>否则用户点「实习经历」只看到一半内容，另一半变成了莫名其妙的「接上页」——
+     * 这是实际使用中第一个被发现的问题。</p>
+     */
+    @Test
+    void mergesCrossPageContinuationIntoPreviousSection() throws Exception {
+        byte[] pdf = twoPageResumePdf();
+        try (PdfPreview preview = PdfPreview.open(pdf)) {
+            List<PdfPreview.SectionBox> sections = preview.sections();
+            List<String> titles = sections.stream().map(PdfPreview.SectionBox::title).toList();
+            assertEquals(List.of("个人信息", "实习经历", "项目经验"), titles,
+                    "第二页开头那两行应当并回「实习经历」，而不是单独成块");
+
+            PdfPreview.SectionBox internship = sections.get(1);
+            assertEquals(2, internship.parts().size(), "跨页的板块应当有两段矩形");
+            assertEquals(1, internship.parts().get(0).page());
+            assertEquals(2, internship.parts().get(1).page());
+            assertTrue(internship.lines().stream().anyMatch(line -> line.text().contains("第二页的续写")),
+                    "续写的行必须在这一块里");
+            assertTrue(internship.lines().stream().anyMatch(line -> line.text().contains("实习经历")));
+
+            // 续写那段是"没有标题的"区域，只框文字，不按整行宽度框
+            PdfPreview.Part tail = internship.parts().get(1);
+            assertTrue(tail.width() < preview.pages().get(1).width() - 40f, "续写段宽度: " + tail.width());
         }
     }
 
@@ -270,5 +302,39 @@ class PdfPreviewTest {
         content.newLineAtOffset(x, y);
         content.showText(text);
         content.endText();
+    }
+
+    /** 两页：第 1 页的「实习经历」写到一半，第 2 页开头接着写，然后才是「项目经验」。 */
+    private static byte[] twoPageResumePdf() throws Exception {
+        Path fontPath = Path.of("C:\\Windows\\Fonts\\simhei.ttf");
+        try (PDDocument document = new PDDocument()) {
+            PDFont font = Files.exists(fontPath)
+                    ? PDType0Font.load(document, fontPath.toFile())
+                    : new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+
+            PDPage first = new PDPage(PDRectangle.A4);
+            document.addPage(first);
+            try (PDPageContentStream content = new PDPageContentStream(document, first)) {
+                write(content, font, 20, 50, 790, "黄洋");
+                write(content, font, 10, 50, 762, "电    话：13450150516");
+                write(content, font, 12, 50, 700, "实习经历");
+                write(content, font, 10, 50, 678, "2026.07 - 2026.09   佳都科技集团股份有限公司");
+                write(content, font, 10, 50, 650, "标注任务全生命周期管理：针对平台、目录、设备等多类型标注对象关系复杂、");
+                write(content, font, 10, 50, 630, "任务状态分散的问题，基于 Spring Boot 和 MyBatis-Plus 实现任务创建");
+            }
+
+            PDPage second = new PDPage(PDRectangle.A4);
+            document.addPage(second);
+            try (PDPageContentStream content = new PDPageContentStream(document, second)) {
+                write(content, font, 10, 50, 780, "这是第二页的续写内容：支撑日均 500+ 任务稳定处理");
+                write(content, font, 10, 50, 760, "以及结果异步回流。");
+                write(content, font, 12, 50, 700, "项目经验");
+                write(content, font, 10, 50, 678, "NovaAI：基于多 Agent 协作的智能面试与职业评估平台");
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            document.save(out);
+            return out.toByteArray();
+        }
     }
 }
