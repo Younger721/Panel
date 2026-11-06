@@ -33,8 +33,10 @@ public class ResumeService {
     private static final long MAX_BYTES = 10L * 1024 * 1024;
     /** 编辑器回写的正文上限，比原文件宽松：纯文本 20 万字符已远超正常简历 */
     private static final int MAX_TEXT_CHARS = 200_000;
-    /** 单次保存最多接受这么多行改动（一页简历的行数远小于此） */
-    private static final int MAX_EDIT_LINES = 5_000;
+    /** 单次保存最多接受这么多板块改动（一份简历的板块数远小于此） */
+    private static final int MAX_EDIT_SECTIONS = 200;
+    /** 板块改动里可能带插图（base64），整体限个大小，别让一个请求把库撑爆 */
+    private static final int MAX_EDIT_CHARS = 8 * 1024 * 1024;
 
     private final ResumeRepository resumes;
     private final ResumeProfileRepository profiles;
@@ -121,7 +123,7 @@ public class ResumeService {
      * 假装回写二进制格式只会让解析器多做一次无意义的转换。</p>
      *
      * @param text  编辑器里的正文（纯文本，换行即分段）
-     * @param edits PDF 原位编辑的"行索引 → 新文本"，随内容一起存，换设备打开也能看到改动
+     * @param edits PDF 原位编辑的"板块序号 → 富文本 HTML"，随内容一起存，换设备打开也能看到改动
      */
     @Transactional
     public ResumeView saveContent(Long id, String text, Map<String, String> edits) {
@@ -146,12 +148,19 @@ public class ResumeService {
         return view(resume);
     }
 
-    /** 行改动只在 PDF 原位编辑里产生，超过这个量说明请求不正常。 */
+    /** 板块改动只在 PDF 原位编辑里产生，超过这个量说明请求不正常。 */
     private String editLayer(Map<String, String> edits) {
         if (edits == null || edits.isEmpty()) {
             return null;
         }
-        if (edits.size() > MAX_EDIT_LINES) {
+        if (edits.size() > MAX_EDIT_SECTIONS) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        int chars = 0;
+        for (String html : edits.values()) {
+            chars += html == null ? 0 : html.length();
+        }
+        if (chars > MAX_EDIT_CHARS) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
         try {

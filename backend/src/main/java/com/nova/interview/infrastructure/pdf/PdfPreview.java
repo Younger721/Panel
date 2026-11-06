@@ -14,10 +14,13 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 原版简历预览：把 PDF 逐页渲染成位图，并保留"字符 → 页面坐标"。
@@ -34,11 +37,29 @@ public final class PdfPreview implements AutoCloseable {
     /** 短于这个长度的片段不足以定位一句话，宁可不高亮也不乱标。 */
     private static final int MIN_PARTIAL = 8;
 
+    /**
+     * 简历里常见的板块标题。
+     *
+     * <p>切板块只能靠关键词，不能靠字号——同一份简历里"实习经历"（板块）和
+     * "电子招标系统"（项目名）往往一样大一样粗，按字号切一定会切错。</p>
+     */
+    private static final Set<String> HEADINGS = Set.of(
+            "个人信息", "个人介绍", "基本信息", "联系方式", "求职意向",
+            "教育背景", "教育经历", "学历背景", "学习经历",
+            "实习经历", "工作经历", "实习与工作经历", "工作与实习经历", "实习经验", "工作经验",
+            "项目经历", "项目经验", "实习与项目经历", "项目实践",
+            "校园经历", "实践经历", "社会实践", "科研经历", "竞赛经历", "培训经历",
+            "专业技能", "技能特长", "技能清单", "个人技能", "技术栈", "技能",
+            "荣誉证书", "获奖经历", "所获荣誉", "荣誉奖项", "证书",
+            "自我评价", "个人评价", "个人优势", "兴趣爱好", "语言能力",
+            "论文发表", "科研成果", "开源项目");
+
     private final PDDocument document;
     private final PDFRenderer renderer;
     private final List<PageInfo> pages;
     private List<PageText> pageTexts;
     private List<LineBox> lineBoxes;
+    private List<SectionBox> sections;
 
     private PdfPreview(PDDocument document) {
         this.document = document;
@@ -281,6 +302,101 @@ public final class PdfPreview implements AutoCloseable {
         return false;
     }
 
+    /**
+     * 按板块切好的文字区域：前端一块一块地编辑（点「实习经历」整块变成富文本框）。
+     *
+     * <p>切法：用板块标题当分隔符。第一个标题之前的部分算"个人信息"（姓名、电话、
+     * 照片旁的那几行）；每个标题到下一个标题之间算一块。没有标题的页面整页算一块，
+     * 这样任何简历都至少有一个可编辑的区域。</p>
+     */
+    public List<SectionBox> sections() {
+        if (sections != null) {
+            return sections;
+        }
+        List<LineBox> lines = textLines();
+        List<SectionBox> result = new ArrayList<>();
+        int index = 0;
+        for (PageInfo page : pages) {
+            List<LineBox> pageLines = new ArrayList<>();
+            for (LineBox line : lines) {
+                if (line.page() == page.index()) {
+                    pageLines.add(line);
+                }
+            }
+            if (pageLines.isEmpty()) {
+                continue;
+            }
+            pageLines.sort(Comparator.comparingDouble(LineBox::y).thenComparingDouble(LineBox::x));
+
+            List<Integer> headingAt = new ArrayList<>();
+            for (int i = 0; i < pageLines.size(); i++) {
+                if (headingOf(pageLines.get(i)) != null) {
+                    headingAt.add(i);
+                }
+            }
+
+            List<int[]> ranges = new ArrayList<>();
+            if (headingAt.isEmpty()) {
+                ranges.add(new int[]{0, pageLines.size(), -1});
+            } else {
+                if (headingAt.get(0) > 0) {
+                    ranges.add(new int[]{0, headingAt.get(0), -1});
+                }
+                for (int i = 0; i < headingAt.size(); i++) {
+                    int start = headingAt.get(i);
+                    int end = i + 1 < headingAt.size() ? headingAt.get(i + 1) : pageLines.size();
+                    ranges.add(new int[]{start, end, start});
+                }
+            }
+
+            for (int[] range : ranges) {
+                List<LineBox> sectionLines = pageLines.subList(range[0], range[1]);
+                if (sectionLines.isEmpty()) {
+                    continue;
+                }
+                boolean untitled = range[2] < 0;
+                String title = untitled
+                        ? (page.index() == 1 ? "个人信息" : "接上页")
+                        : headingOf(pageLines.get(range[2]));
+                result.add(box(index++, page, title, untitled, sectionLines));
+            }
+        }
+        sections = List.copyOf(result);
+        return sections;
+    }
+
+    private static SectionBox box(int index, PageInfo page, String title, boolean untitled, List<LineBox> lines) {
+        float minX = Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        for (LineBox line : lines) {
+            minX = Math.min(minX, line.x());
+            minY = Math.min(minY, line.y());
+            maxX = Math.max(maxX, line.x() + line.width());
+            maxY = Math.max(maxY, line.y() + line.height());
+        }
+        // 没有标题的那块（页首的姓名/联系方式、或上一页写不完的尾巴）只框住文字本身：
+        // 照片、校徽、色块都在同一片区域，整块盖掉会把这些装饰一起抹了
+        float left = untitled ? Math.max(0f, minX - 6f) : 24f;
+        float right = untitled
+                ? Math.min(page.width(), maxX + 6f)
+                : Math.max(page.width() - 24f, maxX + 6f);
+        float top = Math.max(0f, minY - 6f);
+        float bottom = Math.min(page.height(), maxY + 8f);
+        return new SectionBox(index, page.index(), title, left, top, right - left, bottom - top, List.copyOf(lines));
+    }
+
+    /** 标题行返回归一化后的标题文字，否则返回 null。 */
+    private static String headingOf(LineBox line) {
+        String cleaned = line.text().replaceAll("\\s+", "").replace("：", "").replace(":", "");
+        if (cleaned.isEmpty() || cleaned.length() > 12) {
+            return null;
+        }
+        String key = cleaned.toLowerCase(Locale.ROOT);
+        return HEADINGS.contains(key) ? cleaned : null;
+    }
+
     private static float safe(float value) {
         return Float.isFinite(value) && value > 0.5f ? value : 1f;
     }
@@ -360,6 +476,16 @@ public final class PdfPreview implements AutoCloseable {
      * @param size 字号（pt），前端按它渲染覆盖层，才能和底图对得上
      */
     public record LineBox(int page, String text, float x, float y, float width, float height, float size) {
+    }
+
+    /**
+     * 一块可整体编辑的区域（板块）。
+     *
+     * @param index 全局顺序，前端用它当"这块被改过"的键
+     * @param title 板块标题，如「实习经历」；头部那块是「个人信息」
+     */
+    public record SectionBox(int index, int page, String title,
+                             float x, float y, float width, float height, List<LineBox> lines) {
     }
 
     public record Rect(float x, float y, float width, float height) {

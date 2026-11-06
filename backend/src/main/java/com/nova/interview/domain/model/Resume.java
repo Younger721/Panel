@@ -46,12 +46,12 @@ public class Resume {
     private String sourceContentType;
 
     /**
-     * PDF 原位编辑留下的行改动（JSON：行索引 → 新文本）。
+     * PDF 原位编辑留下的板块改动（JSON：板块序号 → 富文本 HTML）。
      *
-     * <p>原件不能被改，所以"看到的改动"得单独存一份：再次打开编辑器时，
-     * 文字层按这份数据还原，换浏览器也一样。</p>
+     * <p>原件不能被改，所以"看到的改动"得单独存一份：再次打开编辑器时按这份数据
+     * 还原，换浏览器也一样。用 MEDIUMTEXT 是因为用户可能往板块里插图（base64）。</p>
      */
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "MEDIUMTEXT")
     private String editLayer;
 
     @Enumerated(EnumType.STRING)

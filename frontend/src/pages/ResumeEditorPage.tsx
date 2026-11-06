@@ -24,7 +24,7 @@ export default function ResumeEditorPage() {
   const [layer, setLayer] = useState<TextLayerView | null>(null)
   const [reason, setReason] = useState<string | null>(null)
   const [fileName, setFileName] = useState('')
-  const [edits, setEdits] = useState<Record<number, string>>({})
+  const [edits, setEdits] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -58,18 +58,12 @@ export default function ResumeEditorPage() {
         if (cancelled) {
           return
         }
-        if (view.available && view.lines.length > 0) {
+        if (view.available && view.sections.length > 0) {
           setLayer(view)
           setReason(null)
           setMode('pdf')
-          // 服务端存着上次保存的行改动（换设备也在），本地草稿只覆盖它
-          const restored: Record<number, string> = {}
-          Object.entries(view.edits ?? {}).forEach(([key, value]) => {
-            const index = Number(key)
-            if (Number.isInteger(index) && typeof value === 'string') {
-              restored[index] = value
-            }
-          })
+          // 服务端存着上次保存的板块改动（换设备也在），本地草稿只覆盖它
+          const restored: Record<string, string> = { ...(view.edits ?? {}) }
           const raw = draftKey ? window.localStorage.getItem(draftKey) : null
           if (raw) {
             try {
@@ -101,7 +95,7 @@ export default function ResumeEditorPage() {
   }, [numericId, draftKey])
 
   const handleEditsChange = useCallback(
-    (next: Record<number, string>) => {
+    (next: Record<string, string>) => {
       setEdits(next)
       if (!draftKey) {
         return
@@ -137,12 +131,8 @@ export default function ResumeEditorPage() {
     setSaving(true)
     setNotice(null)
     try {
-      const lineEdits = surfaceRef.current?.getEdits() ?? {}
-      const payload: Record<string, string> = {}
-      Object.entries(lineEdits).forEach(([key, value]) => {
-        payload[String(key)] = value
-      })
-      await resumeApi.saveContent(numericId, text, undefined, payload)
+      const sectionEdits = surfaceRef.current?.getEdits() ?? {}
+      await resumeApi.saveContent(numericId, text, undefined, sectionEdits)
       if (draftKey) {
         window.localStorage.removeItem(draftKey)
       }
@@ -200,7 +190,7 @@ export default function ResumeEditorPage() {
         </Link>
         <span className="truncate text-sm font-medium text-slate-800">{displayName || `简历 #${numericId}`}</span>
         <span className="hidden rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 sm:inline">
-          点一下文字就能改
+          点一块就能整块改
         </span>
         {changedCount > 0 && (
           <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-600">

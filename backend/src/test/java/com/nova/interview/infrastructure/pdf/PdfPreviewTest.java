@@ -130,6 +130,52 @@ class PdfPreviewTest {
         }
     }
 
+    /**
+     * 板块切分：标题行（教育背景 / 实习经历 …）是分界，页首无标题的那块算「个人信息」。
+     *
+     * <p>前端是「点哪块改哪块」，切错了就会出现"改实习经历把教育背景一起吃掉"这种事故，
+     * 所以这里把边界、标题、矩形范围都钉住。</p>
+     */
+    @Test
+    void splitsPageIntoEditableSections() throws Exception {
+        byte[] pdf = chineseResumePdf();
+        try (PdfPreview preview = PdfPreview.open(pdf)) {
+            PdfPreview.PageInfo page = preview.pages().get(0);
+            List<PdfPreview.SectionBox> sections = preview.sections();
+            List<String> titles = sections.stream().map(PdfPreview.SectionBox::title).toList();
+            assertEquals(List.of("个人信息", "教育背景", "实习与项目经历"), titles);
+
+            int index = 0;
+            for (PdfPreview.SectionBox section : sections) {
+                assertEquals(index++, section.index(), "序号要连续，前端拿它当键");
+                assertEquals(1, section.page());
+                assertTrue(section.width() > 100f, "板块宽度: " + section.width());
+                assertTrue(section.height() > 10f, "板块高度: " + section.height());
+                assertTrue(section.x() >= 0f && section.x() + section.width() <= page.width() + 1f, "横向越界");
+                assertTrue(section.y() >= 0f && section.y() + section.height() <= page.height() + 1f, "纵向越界");
+                assertTrue(!section.lines().isEmpty(), "板块里必须有文字");
+            }
+
+            // 三块要按页面上下的顺序排，且互不重叠
+            for (int i = 1; i < sections.size(); i++) {
+                PdfPreview.SectionBox previous = sections.get(i - 1);
+                PdfPreview.SectionBox current = sections.get(i);
+                assertTrue(current.y() >= previous.y() + previous.height() - 1f,
+                        "板块应当自上而下不重叠: " + previous.title() + " / " + current.title());
+            }
+
+            // 标题行本身属于它下面那一块
+            PdfPreview.SectionBox education = sections.get(1);
+            assertTrue(education.lines().get(0).text().contains("教育背景"));
+            assertEquals(12f, education.lines().get(0).size(), 0.6f);
+
+            // 页首那块只框文字，别把版头装饰一起盖住
+            PdfPreview.SectionBox header = sections.get(0);
+            assertEquals("个人信息", header.title());
+            assertTrue(header.width() < page.width() - 40f, "页首块的宽度应当贴合文字: " + header.width());
+        }
+    }
+
     @Test
     void rendersChineseSampleForVisualInspection() throws Exception {
         Path font = Path.of("C:\\Windows\\Fonts\\simhei.ttf");

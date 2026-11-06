@@ -96,12 +96,24 @@ export interface TextLine {
   size: number
 }
 
+/** 一块可整体编辑的板块（实习经历、教育背景……） */
+export interface TextSection {
+  index: number
+  page: number
+  title: string
+  x: number
+  y: number
+  width: number
+  height: number
+  lines: TextLine[]
+}
+
 export interface TextLayerView {
   available: boolean
   reason: string | null
   pages: PreviewPage[]
-  lines: TextLine[]
-  /** 已保存的行改动：行索引 → 新文本 */
+  sections: TextSection[]
+  /** 已保存的板块改动：板块序号 → 富文本 HTML */
   edits: Record<string, string>
 }
 

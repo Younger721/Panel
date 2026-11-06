@@ -80,6 +80,16 @@ public class ResumeParseWorker implements AsyncJobHandler {
             ResumeParsingService.ParseOutcome outcome =
                     parsing.parse(resume.getId(), resume.getFileName(), resume.getContentType(), bytes);
 
+            // 解析是几十秒的事，期间用户很可能又保存了一版。这时手上这份结果已经过期，
+            // 再写回去会把新的原文指针盖成旧的（改动看似保存了、其实被解析结果抹掉）。
+            // 直接把任务收尾，让新投递的那次任务去处理最新内容。
+            Resume current = resumes.findById(resume.getId()).orElse(null);
+            if (current == null || !current.getObjectKey().equals(resume.getObjectKey())) {
+                log.info("Resume content changed while parsing, dropping stale result: id={}", resume.getId());
+                jobs.complete(job.id());
+                return;
+            }
+
             ResumeProfile profile = profiles.findByResumeId(resume.getId())
                     .orElseGet(() -> ResumeProfile.create(resume.getId(), outcome.normalizedJson(), null, null, null));
             profile.replace(outcome.normalizedJson(),
@@ -89,21 +99,24 @@ public class ResumeParseWorker implements AsyncJobHandler {
             profiles.save(profile);
 
             // 第二段：原文已可用，继续做模块/小点的深度分析（失败会重试）
-            resume.markAnalyzing();
-            resumes.save(resume);
+            current.markAnalyzing();
+            resumes.save(current);
             analysis.analyze(resume.getId(), outcome.document());
 
-            resume.markParsed();
-            resumes.save(resume);
+            Resume done = resumes.findById(resume.getId()).orElse(current);
+            done.markParsed();
+            resumes.save(done);
             jobs.complete(job.id());
         } catch (RuntimeException ex) {
             int attempts = job.attempts() + 1;
+            // 同样用最新的一份，别把失败状态写到已经被新版本替换掉的原文上
+            Resume failed = resumes.findById(resume.getId()).orElse(resume);
             if (attempts >= MAX_ATTEMPTS) {
-                resume.markFailed(ex.getMessage());
+                failed.markFailed(ex.getMessage());
             } else {
-                resume.markRetryable(ex.getMessage());
+                failed.markRetryable(ex.getMessage());
             }
-            resumes.save(resume);
+            resumes.save(failed);
             log.warn("Resume parse failed: id={}, attempt={}, error={}", resume.getId(), attempts, ex.toString());
             jobs.retry(job.id(), ex.getMessage(), now);
         }

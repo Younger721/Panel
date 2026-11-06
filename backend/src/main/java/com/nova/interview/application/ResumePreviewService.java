@@ -69,12 +69,13 @@ public class ResumePreviewService {
      * 文字图层：每页的页面尺寸 + 逐行片段的文本与坐标。
      *
      * <p>前端把页面位图当底图、把这些片段定位叠上去，就得到"和 PDF 一模一样、
-     * 但点一下就能改字"的编辑器。非 PDF 返回空图层，前端退回结构化编辑器。</p>
+     * 但点一块就能整块改"的编辑器。非 PDF 返回空图层，前端退回结构化编辑器。</p>
      */
     public TextLayerView textLayer(Long resumeId) {
         Resume resume = require(resumeId);
         if (!isPdf(resume)) {
-            return new TextLayerView(false, "非 PDF 文件没有原版版面，这里用结构化编辑器改文字", List.of(), List.of(), Map.of());
+            return new TextLayerView(false, "非 PDF 文件没有原版版面，这里用结构化编辑器改文字",
+                    List.of(), List.of(), Map.of());
         }
         byte[] bytes = original(resume);
         Map<String, String> edits = storedEdits(resume);
@@ -82,15 +83,20 @@ public class ResumePreviewService {
             List<PageView> pages = pdf.pages().stream()
                     .map(info -> new PageView(info.index(), info.width(), info.height()))
                     .toList();
-            List<LineView> lines = pdf.textLines().stream()
-                    .map(line -> new LineView(line.page(), line.text(),
-                            round(line.x()), round(line.y()), round(line.width()), round(line.height()),
-                            Math.round(line.size() * 10f) / 10f))
+            List<SectionView> sections = pdf.sections().stream()
+                    .map(section -> new SectionView(section.index(), section.page(), section.title(),
+                            round(section.x()), round(section.y()), round(section.width()), round(section.height()),
+                            section.lines().stream()
+                                    .map(line -> new LineView(line.page(), line.text(),
+                                            round(line.x()), round(line.y()), round(line.width()), round(line.height()),
+                                            Math.round(line.size() * 10f) / 10f))
+                                    .toList()))
                     .toList();
-            return new TextLayerView(true, null, pages, lines, edits);
+            return new TextLayerView(true, null, pages, sections, edits);
         } catch (RuntimeException ex) {
             log.warn("Resume text layer unavailable: id={}, error={}", resumeId, ex.toString());
-            return new TextLayerView(false, "无法读取 PDF 文本层，已切换为结构化编辑器", List.of(), List.of(), Map.of());
+            return new TextLayerView(false, "无法读取 PDF 文本层，已切换为结构化编辑器",
+                    List.of(), List.of(), Map.of());
         }
     }
 
@@ -209,9 +215,13 @@ public class ResumePreviewService {
     public record PreviewView(boolean available, String reason, List<PageView> pages) {
     }
 
-    /** 可原位编辑的文字层。 */
-    public record TextLayerView(boolean available, String reason, List<PageView> pages, List<LineView> lines,
-                                Map<String, String> edits) {
+    /** 可原位编辑的文字层：整块（板块）为单位，而不是一行一行。 */
+    public record TextLayerView(boolean available, String reason, List<PageView> pages,
+                                List<SectionView> sections, Map<String, String> edits) {
+    }
+
+    public record SectionView(int index, int page, String title, float x, float y, float width, float height,
+                              List<LineView> lines) {
     }
 
     public record LineView(int page, String text, float x, float y, float width, float height, float size) {
