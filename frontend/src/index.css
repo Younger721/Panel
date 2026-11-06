@@ -38,16 +38,12 @@ body {
   .paper {
     @apply mx-auto rounded-2xl bg-white shadow-paper;
     width: 100%;
-    max-width: 720px;
-    padding: 48px 52px;
+    max-width: 700px;
+    padding: 46px 50px;
   }
 
   .paper-block {
-    @apply transition-[filter,opacity] duration-150;
-  }
-
-  .paper-block.is-dimmed {
-    @apply opacity-35 blur-[1.2px];
+    @apply transition-colors duration-150;
   }
 
   mark[data-point-id] {

@@ -90,16 +90,18 @@ function renderText(
   return nodes
 }
 
+/**
+ * 正文纸张。悬浮某条批注时**只加重当前句**，其余段落保持原样——
+ * 之前把非当前段落整体调暗 + 模糊，整页就读不下去了。
+ */
 export function ResumePaper({ blocks, anchors, hoveredId, onHover, registerMark }: Props) {
   return (
     <article className="paper">
       {blocks.map(block => {
         const marks = anchors.get(block.id) || []
-        const dimmed = hoveredId !== null && !marks.some(mark => mark.pointId === hoveredId)
         const content = renderText(block.text, marks, hoveredId, onHover, registerMark)
         const className = [
           'paper-block',
-          dimmed ? 'is-dimmed' : '',
           BLOCK_CLASS[block.type] || BLOCK_CLASS.PARAGRAPH,
           sizeOf(block),
           block.type === 'TITLE' ? 'mt-6 mb-2 first:mt-0' : block.type === 'CLAUSE' ? 'mt-4 mb-1' : 'my-1',

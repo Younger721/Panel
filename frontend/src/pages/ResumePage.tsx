@@ -14,7 +14,9 @@ interface FlatPoint {
 interface Connector {
   id: string
   level: Level
-  d: string
+  y: number
+  x1: number
+  x2: number
 }
 
 const STROKE: Record<Level, string> = {
@@ -22,6 +24,9 @@ const STROKE: Record<Level, string> = {
   MEDIUM: '#f59e0b',
   WEAK: '#f43f5e'
 }
+
+/** 卡片之间的最小步进：只露出标题条，要看全文就悬浮展开 */
+const MIN_STEP = 46
 
 export default function ResumePage() {
   const params = useParams()
@@ -35,9 +40,12 @@ export default function ResumePage() {
   const [hovered, setHovered] = useState<string | null>(null)
   const [onlyWeak, setOnlyWeak] = useState(false)
   const [connectors, setConnectors] = useState<Connector[]>([])
+  const [tops, setTops] = useState<Record<string, number>>({})
+  const [layerHeight, setLayerHeight] = useState(0)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const paperRef = useRef<HTMLDivElement | null>(null)
+  const layerRef = useRef<HTMLDivElement | null>(null)
   const markRefs = useRef(new Map<string, HTMLElement>())
   const cardRefs = useRef(new Map<string, HTMLElement>())
 
@@ -114,54 +122,73 @@ export default function ResumePage() {
     }
   }, [])
 
+  /**
+   * 批注卡按原文的纵向位置摆放：悬浮哪一句，右边就在对应那一行展开。
+   * 位置相近的卡片允许重叠（最小步进 46px，只露标题条），避免挤成一片。
+   */
   const measure = useCallback(() => {
     const container = containerRef.current
-    if (!container) {
+    const paper = paperRef.current
+    const layer = layerRef.current
+    if (!container || !paper || !layer) {
       return
     }
     const base = container.getBoundingClientRect()
-    const paperRight = paperRef.current ? paperRef.current.getBoundingClientRect().right : base.left
-    const next: Connector[] = []
-    let index = 0
+    const paperRect = paper.getBoundingClientRect()
+    const layerRect = layer.getBoundingClientRect()
+    if (layerRect.width === 0) {
+      return
+    }
+
+    const items: { id: string; level: Level; markY: number }[] = []
+    const lines: Connector[] = []
     for (const { point } of visiblePoints) {
       const mark = markRefs.current.get(point.id)
-      const card = cardRefs.current.get(point.id)
-      if (!mark || !card) {
+      if (!mark) {
         continue
       }
-      const markRect = mark.getBoundingClientRect()
-      const cardRect = card.getBoundingClientRect()
-      if (markRect.width === 0 || cardRect.width === 0) {
+      const rect = mark.getBoundingClientRect()
+      if (rect.width === 0) {
         continue
       }
-      // 从纸张右边缘引线，不横穿正文；与 mark 的对应关系由纵向位置 + 颜色表达
-      const startX = paperRight - base.left + 2
-      const markY = markRect.top + markRect.height / 2 - base.top
-      const cardLeft = cardRect.left - base.left
-      const cardY = cardRect.top + 24 - base.top
-      const railX = Math.min(startX + 14 + (index % 5) * 4, cardLeft - 28)
-      if (cardLeft <= railX) {
-        continue
-      }
-      index += 1
-      next.push({
+      const centerY = rect.top + rect.height / 2
+      items.push({ id: point.id, level: point.level, markY: centerY - layerRect.top })
+      lines.push({
         id: point.id,
         level: point.level,
-        d: [
-          `M${startX.toFixed(1)},${markY.toFixed(1)}`,
-          `L${(railX - 8).toFixed(1)},${markY.toFixed(1)}`,
-          `Q${railX.toFixed(1)},${markY.toFixed(1)} ${railX.toFixed(1)},${(markY + 8).toFixed(1)}`,
-          `L${railX.toFixed(1)},${(cardY - 8).toFixed(1)}`,
-          `Q${railX.toFixed(1)},${cardY.toFixed(1)} ${(railX + 8).toFixed(1)},${cardY.toFixed(1)}`,
-          `L${cardLeft.toFixed(1)},${cardY.toFixed(1)}`
-        ].join(' ')
+        y: centerY - base.top,
+        x1: paperRect.right - base.left + 2,
+        x2: layerRect.left - base.left
       })
     }
-    setConnectors(prev =>
-      prev.length === next.length && prev.every((item, index) => item.d === next[index].d && item.id === next[index].id)
-        ? prev
-        : next
+
+    items.sort((a, b) => a.markY - b.markY)
+    const nextTops: Record<string, number> = {}
+    let previous = Number.NEGATIVE_INFINITY
+    for (const item of items) {
+      const top = Math.max(item.markY - 26, previous + MIN_STEP)
+      previous = top
+      nextTops[item.id] = Math.round(top)
+    }
+
+    setTops(current => {
+      const keys = Object.keys(nextTops)
+      if (keys.length === Object.keys(current).length && keys.every(key => current[key] === nextTops[key])) {
+        return current
+      }
+      return nextTops
+    })
+    setConnectors(current =>
+      current.length === lines.length &&
+      current.every(
+        (item, index) =>
+          item.y === lines[index].y && item.x1 === lines[index].x1 && item.x2 === lines[index].x2 && item.id === lines[index].id
+      )
+        ? current
+        : lines
     )
+
+    setLayerHeight(Math.max(paperRect.bottom - layerRect.top, previous + 160))
   }, [visiblePoints])
 
   useLayoutEffect(() => {
@@ -187,7 +214,6 @@ export default function ResumePage() {
     if (mark) {
       mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
       setHovered(pointId)
-      window.setTimeout(() => setHovered(current => (current === pointId ? null : current)), 1600)
     }
   }, [])
 
@@ -209,8 +235,8 @@ export default function ResumePage() {
   const stats = analysis.stats
 
   return (
-    <div className="-mx-10 -mt-10 pb-8">
-      <header className="sticky top-0 z-30 border-b border-slate-100 bg-white px-10 py-4">
+    <div className="-mx-10 -mt-10 pb-16">
+      <header className="sticky top-0 z-50 border-b border-slate-100 bg-white px-10 py-4">
         <div className="flex flex-wrap items-center gap-4">
           <Link
             to="/resumes"
@@ -246,76 +272,87 @@ export default function ResumePage() {
             <Eye className="h-3.5 w-3.5" />
             只看弱项
           </button>
-          <button
-            onClick={() => navigate(`/interview/new?resumeId=${resumeId}`)}
-            className="btn-primary shrink-0"
-          >
+          <button onClick={() => navigate(`/interview/new?resumeId=${resumeId}`)} className="btn-primary shrink-0">
             <Mic className="h-4 w-4" />
             模拟面试
           </button>
         </div>
       </header>
 
-      <div
-        ref={containerRef}
-        className="relative mx-auto grid max-w-[1280px] grid-cols-1 gap-6 px-10 pt-6 xl:grid-cols-[minmax(0,1fr)_320px] xl:gap-x-14"
-      >
+      <div ref={containerRef} className="relative mx-auto max-w-[1240px] px-10 pt-6">
         <svg className="pointer-events-none absolute inset-0 hidden h-full w-full xl:block" aria-hidden>
-          {connectors.map(connector => {
-            const [start] = connector.d.split(' ')
-            const [x, y] = start.slice(1).split(',')
-            return (
-              <g key={connector.id}>
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={hovered === connector.id ? 3.2 : 2.2}
-                  fill={STROKE[connector.level]}
-                  opacity={hovered === null ? 0.75 : hovered === connector.id ? 1 : 0.15}
-                />
-                <path
-                  d={connector.d}
-                  fill="none"
-                  stroke={STROKE[connector.level]}
-                  strokeWidth={hovered === connector.id ? 1.8 : 1}
-                  strokeDasharray={hovered === connector.id ? undefined : '3 3'}
-                  opacity={hovered === null ? 0.55 : hovered === connector.id ? 1 : 0.12}
-                  className="transition-opacity duration-150"
-                />
-              </g>
-            )
-          })}
+          {connectors.map(connector => (
+            <g key={connector.id}>
+              <path
+                d={`M${connector.x1.toFixed(1)},${connector.y.toFixed(1)} H${connector.x2.toFixed(1)}`}
+                fill="none"
+                stroke={STROKE[connector.level]}
+                strokeWidth={hovered === connector.id ? 2 : 1.5}
+                strokeDasharray={hovered === connector.id ? undefined : '2 3'}
+                opacity={hovered === null ? 0.5 : hovered === connector.id ? 1 : 0.18}
+                className="transition-opacity duration-150"
+              />
+              <circle
+                cx={connector.x1}
+                cy={connector.y}
+                r={hovered === connector.id ? 3.4 : 2.4}
+                fill={STROKE[connector.level]}
+                opacity={hovered === null ? 0.8 : hovered === connector.id ? 1 : 0.18}
+              />
+            </g>
+          ))}
         </svg>
 
-        <div ref={paperRef} className="min-w-0">
-          <ResumePaper
-            blocks={analysis.blocks}
-            anchors={anchors}
-            hoveredId={hovered}
-            onHover={setHovered}
-            registerMark={registerMark}
-          />
+        <div className="grid grid-cols-1 gap-x-11 xl:grid-cols-[minmax(0,700px)_340px]">
+          <div ref={paperRef} className="min-w-0">
+            <ResumePaper
+              blocks={analysis.blocks}
+              anchors={anchors}
+              hoveredId={hovered}
+              onHover={setHovered}
+              registerMark={registerMark}
+            />
+          </div>
+
+          <div ref={layerRef} className="relative hidden xl:block" style={{ height: layerHeight }}>
+            {visiblePoints.length === 0 && (
+              <p className="rounded-xl border border-dashed border-slate-200 bg-white/70 p-6 text-center text-xs text-slate-400">
+                {onlyWeak ? '没有弱项批注' : '这份简历还没有批注'}
+              </p>
+            )}
+            {visiblePoints.map((item, index) => (
+              <AnnotationCard
+                key={item.point.id}
+                point={item.point}
+                moduleTitle={item.moduleTitle}
+                index={index + 1}
+                active={hovered === item.point.id}
+                top={tops[item.point.id] ?? 0}
+                onHover={setHovered}
+                register={registerCard}
+                onFocusPoint={focusPoint}
+              />
+            ))}
+          </div>
         </div>
 
-        <aside className="flex flex-col gap-3.5">
-          {visiblePoints.length === 0 && (
-            <p className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-8 text-center text-xs text-slate-400">
-              {onlyWeak ? '没有弱项批注' : '这份简历还没有批注'}
-            </p>
-          )}
+        {/* 窄屏：卡片回到常规流式列表，全部展开 */}
+        <div className="mt-6 space-y-3 xl:hidden">
           {visiblePoints.map((item, index) => (
             <AnnotationCard
               key={item.point.id}
               point={item.point}
               moduleTitle={item.moduleTitle}
               index={index + 1}
-              hovered={hovered === item.point.id}
+              active
+              layered={false}
+              top={0}
               onHover={setHovered}
               register={registerCard}
               onFocusPoint={focusPoint}
             />
           ))}
-        </aside>
+        </div>
       </div>
     </div>
   )
