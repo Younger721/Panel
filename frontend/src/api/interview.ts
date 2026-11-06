@@ -1,33 +1,29 @@
 import apiClient, { buildAuthenticatedHeaders } from './client'
 import type {
-  ApiResponse,
   InterviewAnswerResult,
   InterviewSessionSummary,
   InterviewSessionView
 } from '@/types/api'
 
 export const interviewApi = {
-  sessions() {
-    return apiClient.get<any, ApiResponse<InterviewSessionSummary[]>>('/v1/interview/sessions')
+  sessions(): Promise<InterviewSessionSummary[]> {
+    return apiClient.get<unknown, InterviewSessionSummary[]>('/v1/interview/sessions')
   },
 
-  detail(id: number) {
-    return apiClient.get<any, ApiResponse<InterviewSessionView>>(`/v1/interview/sessions/${id}`)
+  detail(id: number): Promise<InterviewSessionView> {
+    return apiClient.get<unknown, InterviewSessionView>(`/v1/interview/sessions/${id}`)
   },
 
-  create(body: { resumeId: number; questionCount: number; followUpLimit: number }) {
-    return apiClient.post<any, ApiResponse<InterviewSessionView>>('/v1/interview/sessions', body)
+  create(body: { resumeId: number; questionCount: number; followUpLimit: number }): Promise<InterviewSessionView> {
+    return apiClient.post<unknown, InterviewSessionView>('/v1/interview/sessions', body)
   },
 
-  answer(id: number, answer: string) {
-    return apiClient.post<any, ApiResponse<InterviewAnswerResult>>(
-      `/v1/interview/sessions/${id}/answers`,
-      { answer }
-    )
+  answer(id: number, answer: string): Promise<InterviewAnswerResult> {
+    return apiClient.post<unknown, InterviewAnswerResult>(`/v1/interview/sessions/${id}/answers`, { answer })
   },
 
-  report(id: number) {
-    return apiClient.get<any, ApiResponse<unknown>>(`/v1/interview/sessions/${id}/report`)
+  report(id: number): Promise<unknown> {
+    return apiClient.get<unknown, unknown>(`/v1/interview/sessions/${id}/report`)
   },
 
   /** 结构化事件流：agent/question/evaluation/report/done。 */

@@ -1,9 +1,25 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import { getToken } from '@/api/client'
+import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect } from 'react'
+import { getToken, setToken } from '@/api/client'
 import LoginPage from '@/pages/LoginPage'
 import UploadPage from '@/pages/UploadPage'
 import ResumePage from '@/pages/ResumePage'
 import PlaceholderPage from '@/pages/PlaceholderPage'
+
+/** 仅开发环境：/dev-login?token=…&next=/resumes/1，用于截图与端到端冒烟。 */
+function DevLogin() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const token = params.get('token')
+  const next = params.get('next') || '/'
+  useEffect(() => {
+    if (token) {
+      setToken(token)
+    }
+    navigate(next, { replace: true })
+  }, [token, next, navigate])
+  return null
+}
 
 function Guard({ children }: { children: React.ReactNode }) {
   const location = useLocation()
@@ -17,6 +33,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {import.meta.env.DEV && <Route path="/dev-login" element={<DevLogin />} />}
       <Route
         path="/"
         element={

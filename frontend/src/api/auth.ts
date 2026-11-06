@@ -1,5 +1,4 @@
 import apiClient from './client'
-import type { ApiResponse } from '@/types/api'
 
 export interface LoginResult {
   accessToken: string
@@ -9,7 +8,7 @@ export interface LoginResult {
 }
 
 export const authApi = {
-  login(username: string, password: string) {
-    return apiClient.post<any, ApiResponse<LoginResult>>('/v1/auth/login', { username, password })
+  login(username: string, password: string): Promise<LoginResult> {
+    return apiClient.post<unknown, LoginResult>('/v1/auth/login', { username, password })
   }
 }

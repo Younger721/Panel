@@ -17,7 +17,7 @@ export default function LoginPage() {
     setError(null)
     try {
       const result = await authApi.login(username.trim(), password)
-      setToken(result.data.accessToken)
+      setToken(result.accessToken)
       navigate(location.state?.from || '/', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败')

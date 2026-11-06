@@ -24,8 +24,8 @@ export default function UploadPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await resumeApi.list()
-      setItems([...result.data].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)))
+      const list = await resumeApi.list()
+      setItems([...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)))
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
@@ -49,7 +49,7 @@ export default function UploadPage() {
         for (let i = 0; i < 90; i += 1) {
           await new Promise(resolve => window.setTimeout(resolve, 2000))
           const result = await resumeApi.find(id)
-          const view = result.data
+          const view = result
           setItems(prev => prev.map(item => (item.id === view.id ? view : item)))
           if (view.status === 'PARSED' || view.status === 'FAILED') {
             break
@@ -69,8 +69,7 @@ export default function UploadPage() {
       setUploading(true)
       setError(null)
       try {
-        const result = await resumeApi.upload(file)
-        const view = result.data
+        const view = await resumeApi.upload(file)
         setActiveId(view.id)
         setItems(prev => [view, ...prev])
         void poll(view.id)

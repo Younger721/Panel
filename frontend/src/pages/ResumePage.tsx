@@ -36,6 +36,7 @@ export default function ResumePage() {
   const [connectors, setConnectors] = useState<Connector[]>([])
 
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const paperRef = useRef<HTMLDivElement | null>(null)
   const markRefs = useRef(new Map<string, HTMLElement>())
   const cardRefs = useRef(new Map<string, HTMLElement>())
 
@@ -47,8 +48,8 @@ export default function ResumePage() {
         if (cancelled) {
           return
         }
-        setAnalysis(view.data)
-        setResume(meta ? meta.data : null)
+        setAnalysis(view)
+        setResume(meta)
         setError(null)
       })
       .catch(err => {
@@ -118,7 +119,9 @@ export default function ResumePage() {
       return
     }
     const base = container.getBoundingClientRect()
+    const paperRight = paperRef.current ? paperRef.current.getBoundingClientRect().right : base.left
     const next: Connector[] = []
+    let index = 0
     for (const { point } of visiblePoints) {
       const mark = markRefs.current.get(point.id)
       const card = cardRefs.current.get(point.id)
@@ -130,18 +133,27 @@ export default function ResumePage() {
       if (markRect.width === 0 || cardRect.width === 0) {
         continue
       }
-      const x1 = markRect.right - base.left
-      const y1 = markRect.top + markRect.height / 2 - base.top
-      const x2 = cardRect.left - base.left
-      const y2 = cardRect.top + 24 - base.top
-      if (x2 <= x1) {
+      // 从纸张右边缘引线，不横穿正文；与 mark 的对应关系由纵向位置 + 颜色表达
+      const startX = paperRight - base.left + 2
+      const markY = markRect.top + markRect.height / 2 - base.top
+      const cardLeft = cardRect.left - base.left
+      const cardY = cardRect.top + 24 - base.top
+      const railX = Math.min(startX + 14 + (index % 5) * 4, cardLeft - 28)
+      if (cardLeft <= railX) {
         continue
       }
-      const mid = Math.max(x1 + 20, x1 + (x2 - x1) * 0.55)
+      index += 1
       next.push({
         id: point.id,
         level: point.level,
-        d: `M${x1.toFixed(1)},${y1.toFixed(1)} C${mid.toFixed(1)},${y1.toFixed(1)} ${mid.toFixed(1)},${y2.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}`
+        d: [
+          `M${startX.toFixed(1)},${markY.toFixed(1)}`,
+          `L${(railX - 8).toFixed(1)},${markY.toFixed(1)}`,
+          `Q${railX.toFixed(1)},${markY.toFixed(1)} ${railX.toFixed(1)},${(markY + 8).toFixed(1)}`,
+          `L${railX.toFixed(1)},${(cardY - 8).toFixed(1)}`,
+          `Q${railX.toFixed(1)},${cardY.toFixed(1)} ${(railX + 8).toFixed(1)},${cardY.toFixed(1)}`,
+          `L${cardLeft.toFixed(1)},${cardY.toFixed(1)}`
+        ].join(' ')
       })
     }
     setConnectors(prev =>
@@ -232,20 +244,33 @@ export default function ResumePage() {
 
       <div ref={containerRef} className="relative mx-auto grid max-w-[1280px] grid-cols-1 gap-6 px-6 pt-6 min-[1100px]:grid-cols-[minmax(0,1fr)_360px]">
         <svg className="pointer-events-none absolute inset-0 hidden h-full w-full min-[1100px]:block" aria-hidden>
-          {connectors.map(connector => (
-            <path
-              key={connector.id}
-              d={connector.d}
-              fill="none"
-              stroke={STROKE[connector.level]}
-              strokeWidth={hovered === connector.id ? 2 : 1.2}
-              opacity={hovered === null ? 0.6 : hovered === connector.id ? 1 : 0.15}
-              className="transition-opacity duration-150"
-            />
-          ))}
+          {connectors.map(connector => {
+            const [start] = connector.d.split(' ')
+            const [x, y] = start.slice(1).split(',')
+            return (
+              <g key={connector.id}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={hovered === connector.id ? 3.2 : 2.2}
+                  fill={STROKE[connector.level]}
+                  opacity={hovered === null ? 0.75 : hovered === connector.id ? 1 : 0.15}
+                />
+                <path
+                  d={connector.d}
+                  fill="none"
+                  stroke={STROKE[connector.level]}
+                  strokeWidth={hovered === connector.id ? 1.8 : 1}
+                  strokeDasharray={hovered === connector.id ? undefined : '3 3'}
+                  opacity={hovered === null ? 0.55 : hovered === connector.id ? 1 : 0.12}
+                  className="transition-opacity duration-150"
+                />
+              </g>
+            )
+          })}
         </svg>
 
-        <div className="min-w-0">
+        <div ref={paperRef} className="min-w-0">
           <ResumePaper
             blocks={analysis.blocks}
             anchors={anchors}

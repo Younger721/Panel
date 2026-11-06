@@ -1,22 +1,23 @@
 import apiClient from './client'
-import type { AnalysisView, ApiResponse, ResumeView } from '@/types/api'
+import type { AnalysisView, ResumeView } from '@/types/api'
 
+/** 统一返回已经拆掉 ApiResponse 外壳的业务数据。 */
 export const resumeApi = {
-  list() {
-    return apiClient.get<any, ApiResponse<ResumeView[]>>('/v1/interview/resumes')
+  list(): Promise<ResumeView[]> {
+    return apiClient.get<unknown, ResumeView[]>('/v1/interview/resumes')
   },
 
-  find(id: number) {
-    return apiClient.get<any, ApiResponse<ResumeView>>(`/v1/interview/resumes/${id}`)
+  find(id: number): Promise<ResumeView> {
+    return apiClient.get<unknown, ResumeView>(`/v1/interview/resumes/${id}`)
   },
 
-  upload(file: File) {
+  upload(file: File): Promise<ResumeView> {
     const form = new FormData()
     form.append('file', file)
-    return apiClient.post<any, ApiResponse<ResumeView>>('/v1/interview/resumes', form)
+    return apiClient.post<unknown, ResumeView>('/v1/interview/resumes', form)
   },
 
-  analysis(id: number) {
-    return apiClient.get<any, ApiResponse<AnalysisView>>(`/v1/interview/resumes/${id}/analysis`)
+  analysis(id: number): Promise<AnalysisView> {
+    return apiClient.get<unknown, AnalysisView>(`/v1/interview/resumes/${id}/analysis`)
   }
 }
