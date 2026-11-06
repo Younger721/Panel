@@ -509,7 +509,9 @@ export default function ResumePage() {
         </svg>
 
         <div className="grid grid-cols-1 gap-x-11 xl:grid-cols-[minmax(0,700px)_340px]">
-          <div ref={paperRef} className="min-w-0">
+          {/* self-start 断开网格 stretch：否则这张纸会被右边的批注层撑高，
+              测量出的纸张高度又反过来把批注层撑得更高。 */}
+          <div ref={paperRef} className="min-w-0 self-start">
             {showingOriginal && preview ? (
               <ResumeOriginal
                 pages={preview.pages}
