@@ -11,6 +11,8 @@ import type { Block } from '@/types/api'
  */
 export interface EditorDocument {
   html: string
+  /** 需要提示用户的降级说明 */
+  warning?: string
 }
 
 interface SectionRule {
@@ -48,6 +50,13 @@ function escapeHtml(value: string): string {
 
 function tidy(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/^[\s·|｜,，、:：-]+/, '').trim()
+}
+
+/** PDF 抽出来的字之间常带空格（「性 别： 男」），把中文字符之间的空白合并掉 */
+function cleanInline(value: string): string {
+  return tidy(value)
+    .replace(/([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])/g, '$1$2')
+    .replace(/\s*[：:]\s*/g, '：')
 }
 
 /** 日期范围统一成 `2020.07 – 2021.06` / `2021.07 – 至今`，注意别把「至今」拆开 */
@@ -145,10 +154,20 @@ export function buildEditorDocument(blocks: Block[]): EditorDocument {
     return { html: '' }
   }
 
+  // PDF 抽出来的正文常常整篇都是 PARAGRAPH（没有标题块），这时靠关键词反推章节
+  const flat = !blocks.some(block => block.type === 'TITLE')
+
   const queue = [...blocks]
   let name = ''
   let headline = ''
   const contacts: string[] = []
+
+  const pushContact = (text: string) => {
+    const cleaned = cleanInline(text).replace(/\s*[|｜]\s*/g, ' · ')
+    if (cleaned) {
+      contacts.push(cleaned)
+    }
+  }
 
   // 头部：第一块标题当姓名+求职意向；其后连续的段落里挑联系方式
   const first = queue[0]
@@ -165,8 +184,30 @@ export function buildEditorDocument(blocks: Block[]): EditorDocument {
   }
   while (queue.length && queue[0].type !== 'TITLE') {
     const text = tidy(queue[0].text)
+    const compact = text.replace(/\s+/g, '')
     if (/电话|邮箱|@|微信|城市|现居|工作年限|工作经验/.test(text)) {
-      contacts.push(text.replace(/\s*[|｜]\s*/g, ' · '))
+      pushContact(text)
+      queue.shift()
+      continue
+    }
+    if (flat && /电话|邮箱|@|性别|籍贯|年龄|出生|民族/.test(compact)) {
+      pushContact(text)
+      queue.shift()
+      continue
+    }
+    if (flat && !name && /^[\u4e00-\u9fa5·]{2,4}$/.test(compact)) {
+      name = compact
+      queue.shift()
+      continue
+    }
+    if (
+      flat &&
+      !headline &&
+      compact.length <= 32 &&
+      /(工程师|开发|经理|设计师|分析师|运营|产品|本科|硕士|博士|学生)/.test(compact) &&
+      !/^(19|20)\d{2}/.test(compact)
+    ) {
+      headline = compact
       queue.shift()
       continue
     }
@@ -186,6 +227,21 @@ export function buildEditorDocument(blocks: Block[]): EditorDocument {
     const text = tidy(block.text)
     if (!text) {
       continue
+    }
+    // 扁平文档（PDF）：短句命中章节关键词就当标题，日期开头的行当条目
+    if (flat && (block.type === 'PARAGRAPH' || block.type === 'LIST_ITEM')) {
+      const rule = sectionRuleOf(text)
+      if (rule) {
+        current = startSection(rule.type, text)
+        continue
+      }
+      if (current && ENTRY_TYPES.has(current.type) && DATE_PREFIX.test(block.text.trim())) {
+        const { meta, title } = splitEntryTitle(block.text)
+        if (title) {
+          current.entries.push({ title, meta, bullets: [] })
+          continue
+        }
+      }
     }
     if (block.type === 'TITLE' || block.type === 'CLAUSE') {
       const rule = sectionRuleOf(text)
@@ -242,5 +298,8 @@ export function buildEditorDocument(blocks: Block[]): EditorDocument {
 
   const body = sections.map(renderSection).filter(Boolean).join('')
 
-  return { html: header + body }
+  return {
+    html: header + body,
+    warning: flat ? 'PDF 抽取出来的段落顺序可能和原文不一致，进编辑器后建议先核对一遍。' : undefined
+  }
 }

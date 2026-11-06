@@ -18,6 +18,7 @@ export default function ResumeEditorPage() {
 
   const [loading, setLoading] = useState(Boolean(numericId))
   const [error, setError] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
 
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const documentRef = useRef<EditorDocument | null>(null)
@@ -49,6 +50,7 @@ export default function ResumeEditorPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setWarning(null)
     sentRef.current = false
     documentRef.current = null
 
@@ -65,6 +67,7 @@ export default function ResumeEditorPage() {
           return
         }
         documentRef.current = document
+        setWarning(document.warning || null)
         deliver()
       })
       .catch(err => {
@@ -91,6 +94,14 @@ export default function ResumeEditorPage() {
     return () => window.removeEventListener('message', onMessage)
   }, [deliver])
 
+  useEffect(() => {
+    if (!warning) {
+      return
+    }
+    const timer = window.setTimeout(() => setWarning(null), 12000)
+    return () => window.clearTimeout(timer)
+  }, [warning])
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-white">
       <iframe
@@ -99,6 +110,12 @@ export default function ResumeEditorPage() {
         src="/resume-editor.html?embed=1"
         className="h-full w-full border-0"
       />
+
+      {warning && (
+        <div className="pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-2 text-xs text-amber-700 shadow-card">
+          {warning}
+        </div>
+      )}
 
       {loading && !error && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/85 text-sm text-slate-400">
