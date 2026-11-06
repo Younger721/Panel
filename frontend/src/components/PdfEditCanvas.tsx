@@ -127,6 +127,45 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     }
   }, [layer.pages, resumeId])
 
+  /**
+   * 把简历里嵌的字体装进浏览器。
+   *
+   * 光按字体名找系统字体是不够的：这份简历存的字体名叫 KaiTi，嵌进去的字形却是宋体味的，
+   * 用系统楷体去还原反而更不像。这里直接拿 PDF 里那份字体字节喂给 @font-face。
+   */
+  const [fontFamilies, setFontFamilies] = useState<Record<string, string>>({})
+  useEffect(() => {
+    const fonts = layer.fonts ?? []
+    if (fonts.length === 0) {
+      return
+    }
+    let cancelled = false
+    const faces: FontFace[] = []
+    void (async () => {
+      for (const font of fonts) {
+        try {
+          const blob = await resumeApi.previewFont(resumeId, font.family)
+          const face = new FontFace(font.family, await blob.arrayBuffer())
+          await face.load()
+          if (cancelled) {
+            return
+          }
+          document.fonts.add(face)
+          faces.push(face)
+          setFontFamilies(current =>
+            current[font.key] === font.family ? current : { ...current, [font.key]: font.family }
+          )
+        } catch {
+          // 单个字体失败就退回系统字体，不影响编辑
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+      faces.forEach(face => document.fonts.delete(face))
+    }
+  }, [layer.fonts, resumeId])
+
   /** 每一块没被改过时的初始 HTML（按原文排版还原，字号跟着页面缩放走） */
   const seeds = useMemo(() => {
     const right = new Map<number, number>()
@@ -139,10 +178,10 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     const result = new Map<number, string>()
     layer.sections.forEach(section => {
       const pageOf = section.lines[0]?.page ?? 1
-      result.set(section.index, toSeedHtml(section.lines, right.get(pageOf) ?? 0, zoom))
+      result.set(section.index, toSeedHtml(section.lines, right.get(pageOf) ?? 0, zoom, fontFamilies))
     })
     return result
-  }, [layer.pages, layer.sections, zoom])
+  }, [layer.pages, layer.sections, zoom, fontFamilies])
 
   const htmlOf = useCallback(
     (index: number) => edits[String(index)] ?? seeds.get(index) ?? '',
@@ -180,6 +219,21 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
       scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + offset - 40), behavior: 'smooth' })
     }
   }, [active])
+
+  // 字体是异步装进来的：装好时如果编辑框还开着、而且用户还没动过，就换成嵌入字体重灌一次
+  useEffect(() => {
+    const node = editorRef.current
+    const { index, html, seed } = draft.current
+    if (!node || index === null || html.trim() !== seed) {
+      return
+    }
+    const next = htmlOfRef.current(index)
+    if (next.trim() === html.trim()) {
+      return
+    }
+    node.innerHTML = next
+    draft.current = { index, html: next, seed: next.trim() }
+  }, [fontFamilies])
 
   const commitDraft = useCallback(() => {
     const { index, html, seed } = draft.current

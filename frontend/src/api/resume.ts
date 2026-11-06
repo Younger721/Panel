@@ -43,6 +43,11 @@ export const resumeApi = {
     return requestBlob(`/v1/interview/resumes/${id}/preview/pages/${page}?scale=${scale}`)
   },
 
+  /** 简历里嵌的字体文件（原始字节），给编辑框当网页字体用。 */
+  previewFont(id: number, family: string): Promise<Blob> {
+    return requestBlob(`/v1/interview/resumes/${id}/preview/fonts/${encodeURIComponent(family)}`)
+  },
+
   /** 把批注引用的原文批量映射成页面高亮框。 */
   locate(id: number, quotes: QuoteRequest[]): Promise<Record<string, HighlightView>> {
     return apiClient.post<unknown, Record<string, HighlightView>>(`/v1/interview/resumes/${id}/preview/locate`, {

@@ -1,20 +1,28 @@
 package com.nova.interview.infrastructure.pdf;
 
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDFontDescriptor;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -35,6 +43,8 @@ import java.util.Set;
  * 与 {@link PDFRenderer} 渲染出的位图方向一致。前端按百分比缩放即可。</p>
  */
 public final class PdfPreview implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(PdfPreview.class);
 
     /** 短于这个长度的片段不足以定位一句话，宁可不高亮也不乱标。 */
     private static final int MIN_PARTIAL = 8;
@@ -62,6 +72,7 @@ public final class PdfPreview implements AutoCloseable {
     private List<PageText> pageTexts;
     private List<LineBox> lineBoxes;
     private List<SectionBox> sections;
+    private List<EmbeddedFont> embeddedFonts;
 
     private PdfPreview(PDDocument document) {
         this.document = document;
@@ -123,8 +134,7 @@ public final class PdfPreview implements AutoCloseable {
      * <p>粒度就是 PDFTextStripper 的一次回调：同一视觉行的左右两栏会分成两段，
      * 这正好是编辑需要的粒度——改左边不会碰到右边。</p>
      */
-    public List<LineBox> textLines() {
-        if (lineBoxes == null) {
+    public List<LineBox> textLines() {        if (lineBoxes == null) {
             Collector collector = new Collector();
             try {
                 collector.getText(document);
@@ -138,6 +148,91 @@ public final class PdfPreview implements AutoCloseable {
             lineBoxes = List.copyOf(lines);
         }
         return lineBoxes;
+    }
+
+    /**
+     * PDF 里嵌入的字体文件（子集）。
+     *
+     * <p>简历排版用的常是系统里装过的中文字体，名字和字形未必对得上（这份"楷体"嵌进去的
+     * 其实是宋体味儿的字形），光靠字体名去猜永远是差一点的。把嵌入的那份字节拿出来给前端
+     * 当网页字体用，编辑框里的字就和上面那张纸是同一套字形。</p>
+     *
+     * <p>返回的 key 与 {@link LineBox#fontKey()} 一致（PDF 的 BaseFont 名，带子集前缀）。</p>
+     */
+    public List<EmbeddedFont> fonts() {
+        if (embeddedFonts != null) {
+            return embeddedFonts;
+        }
+        Map<String, EmbeddedFont> found = new LinkedHashMap<>();
+        for (PageInfo info : pages) {
+            collectFonts(document.getPage(info.index() - 1).getResources(), found, 0);
+        }
+        embeddedFonts = List.copyOf(found.values());
+        return embeddedFonts;
+    }
+
+    private void collectFonts(PDResources resources, Map<String, EmbeddedFont> found, int depth) {
+        if (resources == null || depth > 4) {
+            return;
+        }
+        for (COSName name : resources.getFontNames()) {
+            try {
+                PDFont font = resources.getFont(name);
+                String key = font.getName();
+                if (key == null || found.containsKey(key)) {
+                    continue;
+                }
+                PDFontDescriptor descriptor = font.getFontDescriptor();
+                PDStream stream = descriptor == null ? null : fontProgram(descriptor);
+                if (stream == null) {
+                    continue;
+                }
+                byte[] data;
+                try (InputStream in = stream.createInputStream()) {
+                    data = in.readAllBytes();
+                }
+                if (data.length == 0) {
+                    continue;
+                }
+                found.put(key, new EmbeddedFont(key, streamFormat(stream), data));
+            } catch (IOException | RuntimeException ex) {
+                log.debug("Skip unreadable PDF font {}: {}", name.getName(), ex.toString());
+            }
+        }
+        for (COSName name : resources.getXObjectNames()) {
+            try {
+                PDXObject xobject = resources.getXObject(name);
+                if (xobject instanceof PDFormXObject form) {
+                    collectFonts(form.getResources(), found, depth + 1);
+                }
+            } catch (IOException | RuntimeException ex) {
+                log.debug("Skip unreadable PDF xobject {}: {}", name.getName(), ex.toString());
+            }
+        }
+    }
+
+    private static PDStream fontProgram(PDFontDescriptor descriptor) {
+        PDStream stream = descriptor.getFontFile2();
+        if (stream != null) {
+            return stream;
+        }
+        stream = descriptor.getFontFile3();
+        if (stream != null) {
+            return stream;
+        }
+        return descriptor.getFontFile();
+    }
+
+    private static String streamFormat(PDStream stream) {
+        String subtype = stream.getCOSObject().getNameAsString(COSName.SUBTYPE);
+        if ("OpenType".equals(subtype) || "CIDFontType0C".equals(subtype) || "Type1C".equals(subtype)) {
+            return "opentype";
+        }
+        return "truetype";
+    }
+
+    /** 一个嵌入字体：key 是 PDF 里的字体名，data 是原始字体文件。 */
+    public record EmbeddedFont(String key, String format, byte[] data) {
     }
 
     /**
@@ -540,9 +635,16 @@ public final class PdfPreview implements AutoCloseable {
      *
      * @param size     版面用的字高（行框/高亮条的高度按它算）
      * @param fontSize 实际渲染字号（按全角字宽量的），编辑框还原字体大小用这个
+     * @param font     去掉子集前缀的字体名（KaiTi / ArialMT），兜底用
+     * @param fontKey  PDF 里的原样字体名（BAAAAA+KaiTi），对应 {@link #fonts()} 里的嵌入字体
+     * @param runs     行内按字体切开的段；整行同一个字体时为空
      */
     public record LineBox(int page, String text, float x, float y, float width, float height, float size,
-                          float fontSize, String font, boolean bold) {
+                          float fontSize, String font, String fontKey, boolean bold, List<Run> runs) {
+    }
+
+    /** 行内一段同字体的文字。 */
+    public record Run(String text, String font, String fontKey, float size, boolean bold) {
     }
 
     /**
@@ -651,10 +753,66 @@ public final class PdfPreview implements AutoCloseable {
                     dominant = fonts.get(entry.getKey());
                 }
             }
+            // 混排行里有中文就以中文那个字体为准：英文单词多了，按字数算会把整行判成 Arial，
+            // 中文再退化成系统无衬线，和纸上的楷体对不上
+            for (TextPosition position : textPositions) {
+                String unicode = position.getUnicode();
+                if (unicode != null && !unicode.isEmpty() && isIdeograph(unicode.charAt(0))
+                        && position.getFont() != null) {
+                    dominant = position.getFont();
+                    break;
+                }
+            }
             String fontName = fontName(dominant);
+            String fontKey = dominant == null || dominant.getName() == null ? "" : dominant.getName();
             boolean bold = isBold(dominant);
+            List<Run> runs = runs(textPositions, fonts, size, fontSize, fontName, fontKey, bold);
             byPageLines.computeIfAbsent(page, key -> new ArrayList<>())
-                    .add(new LineBox(page, value, left, top, right - left, bottom - top, size, fontSize, fontName, bold));
+                    .add(new LineBox(page, value, left, top, right - left, bottom - top,
+                            size, fontSize, fontName, fontKey, bold, runs));
+        }
+
+        /**
+         * 一行里按字体切成若干段：中文用楷体、数字和英文用 Arial，原样保留。
+         *
+         * <p>整行只留一个字体的话，正文里夹的数字和英文会被迫用中文字体渲染，
+         * 和纸面一比就能看出来。</p>
+         */
+        private List<Run> runs(List<TextPosition> positions, Map<String, PDFont> fonts,
+                               float size, float fontSize, String fallbackFont, String fallbackKey, boolean fallbackBold) {
+            List<Run> runs = new ArrayList<>();
+            StringBuilder text = new StringBuilder();
+            String currentKey = null;
+            for (TextPosition position : positions) {
+                String unicode = position.getUnicode();
+                if (unicode == null || unicode.isEmpty()) {
+                    continue;
+                }
+                String key = position.getFont() == null || position.getFont().getName() == null
+                        ? "" : position.getFont().getName();
+                if (currentKey != null && !currentKey.equals(key)) {
+                    runs.add(runOf(text, currentKey, fonts, fontSize, fallbackFont, fallbackKey, fallbackBold));
+                    text = new StringBuilder();
+                }
+                currentKey = key;
+                text.append(unicode);
+            }
+            if (text.length() > 0) {
+                runs.add(runOf(text, currentKey, fonts, fontSize, fallbackFont, fallbackKey, fallbackBold));
+            }
+            // 全部段落合并成一个字体时没必要多套 span，返回空让前端退回整行样式
+            boolean sameFont = runs.stream().map(Run::fontKey).distinct().count() <= 1;
+            return sameFont ? List.of() : runs;
+        }
+
+        private Run runOf(StringBuilder text, String key, Map<String, PDFont> fonts, float fontSize,
+                          String fallbackFont, String fallbackKey, boolean fallbackBold) {
+            String value = text.toString();
+            PDFont font = key == null ? null : fonts.get(key);
+            if (font == null) {
+                return new Run(value, fallbackFont, fallbackKey, fontSize, fallbackBold);
+            }
+            return new Run(value, fontName(font), key, fontSize, isBold(font));
         }
 
         @Override
@@ -682,11 +840,16 @@ public final class PdfPreview implements AutoCloseable {
                     } else {
                         fixed.add(new LineBox(line.page(), line.text(), line.x(), line.y(), line.width(),
                                 line.height(), line.size(), Math.round(line.size() * ratio * 10f) / 10f,
-                                line.font(), line.bold()));
+                                line.font(), line.fontKey(), line.bold(), line.runs()));
                     }
                 }
                 entry.setValue(fixed);
             }
+        }
+
+        /** 真正的汉字（不含全角标点），用来挑"中文那个字体"。 */
+        private static boolean isIdeograph(char value) {
+            return (value >= 0x4E00 && value <= 0x9FFF) || (value >= 0x3400 && value <= 0x4DBF);
         }
 
         /** 全角字符（中文、中文标点、全角符号）——它的字宽就是字号。 */

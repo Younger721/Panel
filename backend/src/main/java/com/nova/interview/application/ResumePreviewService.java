@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,7 +76,7 @@ public class ResumePreviewService {
         Resume resume = require(resumeId);
         if (!isPdf(resume)) {
             return new TextLayerView(false, "非 PDF 文件没有原版版面，这里用结构化编辑器改文字",
-                    List.of(), List.of(), Map.of());
+                    List.of(), List.of(), List.of(), Map.of());
         }
         byte[] bytes = original(resume);
         Map<String, String> edits = storedEdits(resume);
@@ -91,15 +92,64 @@ public class ResumePreviewService {
                                     .map(line -> new LineView(line.page(), line.text(),
                                             round(line.x()), round(line.y()), round(line.width()), round(line.height()),
                                             Math.round(line.size() * 10f) / 10f,
-                                            Math.round(line.fontSize() * 10f) / 10f, line.font(), line.bold()))
+                                            Math.round(line.fontSize() * 10f) / 10f,
+                                            line.font(), line.fontKey(), line.bold(),
+                                            line.runs().stream()
+                                                    .map(run -> new RunView(run.text(), run.font(), run.fontKey(),
+                                                            Math.round(run.size() * 10f) / 10f, run.bold()))
+                                                    .toList()))
                                     .toList()))
                     .toList();
-            return new TextLayerView(true, null, pages, sections, edits);
+            List<FontView> fonts = pdf.fonts().stream()
+                    .map(font -> new FontView(font.key(), familyOf(font.data()), font.format(), font.data().length))
+                    .toList();
+            return new TextLayerView(true, null, pages, sections, fonts, edits);
         } catch (RuntimeException ex) {
             log.warn("Resume text layer unavailable: id={}, error={}", resumeId, ex.toString());
             return new TextLayerView(false, "无法读取 PDF 文本层，已切换为结构化编辑器",
-                    List.of(), List.of(), Map.of());
+                    List.of(), List.of(), List.of(), Map.of());
         }
+    }
+
+    /**
+     * PDF 里嵌入的某个字体文件的原始字节。
+     *
+     * <p>编辑框用 {@code @font-face} 把这份字节装进浏览器，字形就和渲染出来的页面完全一致——
+     * 光按字体名映射系统字体是不够的：这份简历存的名字是 KaiTi，嵌进去的字形却是宋体味儿的。</p>
+     */
+    public FontFile fontFile(Long resumeId, String family) {
+        Resume resume = require(resumeId);
+        if (!isPdf(resume) || family == null || family.isBlank()) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        try (PdfPreview pdf = PdfPreview.open(original(resume))) {
+            for (PdfPreview.EmbeddedFont font : pdf.fonts()) {
+                if (familyOf(font.data()).equals(family)) {
+                    return new FontFile(font.data(), contentType(font.format()));
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Resume font unavailable: id={}, family={}, error={}", resumeId, family, ex.toString());
+        }
+        throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
+    }
+
+    /** 字体家族名按内容哈希取，稳定且不会因为字体顺序变化而串。 */
+    private static String familyOf(byte[] data) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-1").digest(data);
+            StringBuilder builder = new StringBuilder("NovaFont_");
+            for (int i = 0; i < 4; i++) {
+                builder.append(String.format(Locale.ROOT, "%02x", digest[i]));
+            }
+            return builder.toString();
+        } catch (Exception ex) {
+            return "NovaFont_" + Math.abs(java.util.Arrays.hashCode(data));
+        }
+    }
+
+    private static String contentType(String format) {
+        return "opentype".equals(format) ? "font/otf" : "font/ttf";
     }
 
     /** 上一次保存留下的行改动；解析不了就当没有，不能让坏 JSON 把编辑器挡住。 */
@@ -219,7 +269,15 @@ public class ResumePreviewService {
 
     /** 可整体编辑的文字层：一块 = 一个板块，跨页的板块有多个 part。 */
     public record TextLayerView(boolean available, String reason, List<PageView> pages,
-                                List<SectionView> sections, Map<String, String> edits) {
+                                List<SectionView> sections, List<FontView> fonts,
+                                Map<String, String> edits) {
+    }
+
+    /** 一个内嵌字体：key 与 line.fontKey 对应，family 是给 @font-face 用的稳定名字。 */
+    public record FontView(String key, String family, String format, int size) {
+    }
+
+    public record FontFile(byte[] data, String contentType) {
     }
 
     public record SectionView(int index, String title, PartView heading, List<PartView> parts,
@@ -234,7 +292,11 @@ public class ResumePreviewService {
     }
 
     public record LineView(int page, String text, float x, float y, float width, float height, float size,
-                           float fontSize, String font, boolean bold) {
+                           float fontSize, String font, String fontKey, boolean bold, List<RunView> runs) {
+    }
+
+    /** 行内一段同字体的文字（中文楷体 + 数字 Arial 这种）。 */
+    public record RunView(String text, String font, String fontKey, float size, boolean bold) {
     }
 
     public record RectView(float x, float y, float width, float height) {

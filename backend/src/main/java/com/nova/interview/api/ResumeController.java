@@ -134,8 +134,18 @@ public class ResumeController {
                 .body(previewService.pageImage(id, page, scale));
     }
 
-    /** 把分析里的 quote 批量映射成页面矩形，供前端画高亮框。 */
-    @PostMapping("/{id}/preview/locate")
+    /** 简历里嵌的字体文件，给编辑框当网页字体用，字形才和原件一致。 */
+    @GetMapping("/{id}/preview/fonts/{family}")
+    public ResponseEntity<byte[]> previewFont(@PathVariable Long id, @PathVariable String family) {
+        require("resume:read");
+        ResumePreviewService.FontFile file = previewService.fontFile(id, family);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.contentType()))
+                .cacheControl(CacheControl.maxAge(Duration.ofDays(7)).cachePrivate())
+                .body(file.data());
+    }
+
+    /** 把分析里的 quote 批量映射成页面矩形，供前端画高亮框。 */    @PostMapping("/{id}/preview/locate")
     public ApiResponse<Map<String, ResumePreviewService.HighlightView>> locate(
             @PathVariable Long id,
             @RequestBody ResumePreviewService.LocateRequest request) {

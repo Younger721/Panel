@@ -85,6 +85,15 @@ export interface PreviewView {
   pages: PreviewPage[]
 }
 
+/** 行内一段同字体的文字（中文楷体 + 数字 Arial 这种） */
+export interface TextRun {
+  text: string
+  font?: string | null
+  fontKey?: string | null
+  size?: number
+  bold?: boolean
+}
+
 /** 可原位编辑的一行文字：坐标原点为页面左上角，单位 PDF 点 */
 export interface TextLine {
   page: number
@@ -99,7 +108,20 @@ export interface TextLine {
   fontSize?: number
   /** PDF 里的字体名，例如 KaiTi / ArialMT；拿不到时为 null */
   font?: string | null
+  /** PDF 里的原样字体名（带子集前缀，如 BAAAAA+KaiTi），对应 fonts 里的嵌入字体 */
+  fontKey?: string | null
   bold?: boolean
+  /** 行内按字体切开的段；整行同一个字体时为空 */
+  runs?: TextRun[]
+}
+
+/** 简历里嵌入的一个字体文件，编辑框用 @font-face 装进浏览器 */
+export interface PreviewFont {
+  key: string
+  /** 稳定的家族名（按字体内容哈希），写进 HTML 也认得出 */
+  family: string
+  format: string
+  size: number
 }
 
 /** 板块在某一页上占的矩形（跨页的板块有多段） */
@@ -127,6 +149,8 @@ export interface TextLayerView {
   reason: string | null
   pages: PreviewPage[]
   sections: TextSection[]
+  /** 简历里嵌入的字体，编辑框按 key 关联到每一行 */
+  fonts?: PreviewFont[]
   /** 已保存的板块改动：板块序号 → 富文本 HTML */
   edits: Record<string, string>
 }
@@ -156,10 +180,20 @@ export interface InterviewSessionView {
   turnBudget: number
   questionCount: number
   followUpLimit: number
+  /** 面试官人设 code：SERIOUS / WARM / PRESSURE */
+  persona: string
   currentTurn: number
   overallScore: number | null
   createdAt: string
   turns: InterviewTurnView[]
+}
+
+export interface InterviewerPersonaView {
+  code: string
+  label: string
+  title: string
+  description: string
+  followUpThreshold: number
 }
 
 export interface TurnScores {

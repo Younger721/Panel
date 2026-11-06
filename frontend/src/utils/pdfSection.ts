@@ -9,14 +9,29 @@ import type { TextLine } from '@/types/api'
 
 export interface Paragraph {
   text: string
+  /** 段落内部按字体切开的段（中文楷体 + 数字 Arial 这种） */
+  runs: ParagraphRun[]
   /** 页面单位（≈ PDF 点）的字号 */
   size: number
   /** PDF 里的字体名（已去掉子集前缀），未知时为空 */
   font: string | null
+  /** PDF 里的原样字体名，用来找嵌入字体 */
+  fontKey: string | null
   bold: boolean
   /** 页面单位的行距（按原件量出来的基线间距） */
   lineHeight: number
 }
+
+/** 段落里一段同字体的文字。 */
+export interface ParagraphRun {
+  text: string
+  font: string | null
+  fontKey: string | null
+  bold: boolean
+}
+
+/** 嵌入字体的映射：line.fontKey → @font-face 家族名 */
+export type EmbeddedFamilies = Record<string, string>
 
 const BULLETS = new Set(['•', '·', '▪', '■', '◦', '●', '-', '—'])
 const TERMINAL = /[；;。：:！!？?]$/
@@ -65,6 +80,22 @@ export function cssFamily(font: string | null | undefined): string {
   return cleaned ? `'${cleaned}', ${FALLBACK_FAMILY}` : FALLBACK_FAMILY
 }
 
+/**
+ * 优先用简历里嵌的那个字体文件，其次是按字体名猜的系统字体。
+ *
+ * 嵌入字体是子集，只包含简历里出现过的字；用户新打的字会落到后面的系统字体上，
+ * 浏览器按字回退，所以兜底那一串不能省。
+ */
+export function resolveFamily(
+  fontKey: string | null | undefined,
+  font: string | null | undefined,
+  families?: EmbeddedFamilies
+): string {
+  const embedded = fontKey && families ? families[fontKey] : undefined
+  const fallback = cssFamily(font)
+  return embedded ? `'${embedded}', ${fallback}` : fallback
+}
+
 /** 一页里正文最右边界，用来判断"这行是被折行折断的"。 */
 export function pageRightOf(lines: TextLine[]): number {
   return lines.reduce((right, line) => Math.max(right, line.x + line.width), 0)
@@ -82,22 +113,30 @@ export function pageRightOf(lines: TextLine[]): number {
 export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] {
   const blockPitch = medianPitch(lines)
   const drafts: {
-    texts: string[]
+    runs: ParagraphRun[]
     size: number
+    /** 这一段的"主字体"：段落基准样式用它，其余字体用 span 覆盖 */
     font: string | null
+    fontKey: string | null
     bold: boolean
     ys: number[]
   }[] = []
   let previous: TextLine | null = null
 
-  const push = (line: TextLine, text: string) => {
+  const push = (line: TextLine, prefix?: string) => {
+    const runs = runsOf(line)
+    if (prefix && runs.length > 0) {
+      runs[0] = { ...runs[0], text: prefix + runs[0].text }
+    }
+    const primary = runs[0] ?? { text: '', font: null, fontKey: null, bold: false }
     drafts.push({
-      texts: [text],
+      runs,
       // 用渲染出来的字号（后端按全角字宽量的），不是 PDF 里写的 Tf 值：
       // 有的简历 PDF 带文字矩阵缩放，两个数能差三成
       size: line.fontSize || line.size,
-      font: line.font ?? null,
-      bold: line.bold ?? false,
+      font: line.font ?? primary.font,
+      fontKey: line.fontKey ?? primary.fontKey,
+      bold: line.bold ?? primary.bold,
       ys: [line.y]
     })
   }
@@ -129,10 +168,10 @@ export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] 
 
     const last = drafts[drafts.length - 1]
     if (wrapped && last) {
-      last.texts.push(text)
+      appendRuns(last.runs, runsOf(line))
       last.ys.push(line.y)
     } else {
-      push(line, text)
+      push(line)
     }
     previous = line
   }
@@ -140,22 +179,69 @@ export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] 
   return drafts.map(draft => {
     const size = draft.size
     const measured = pitchOf(draft.ys)
+    // 行距夹在 1.05~2.2 倍字号之间：量歪了也不至于把一块内容排得东倒西歪
+    const raw = measured || blockPitch || size * 1.45
+    const lineHeight = Math.min(Math.max(raw, size * 1.05), size * 2.2)
     return {
-      text: draft.texts.reduce((head, tail) => joinText(head, tail)),
+      text: draft.runs.map(run => run.text).join(''),
+      runs: draft.runs,
       size,
       font: draft.font,
+      fontKey: draft.fontKey,
       bold: draft.bold,
-      lineHeight: measured || blockPitch || size * 1.45
+      lineHeight
     }
   })
+}
+
+/** 一行拆成"同字体的几段"；后端没给 runs 时整行算一段。 */
+function runsOf(line: TextLine): ParagraphRun[] {
+  const runs = line.runs && line.runs.length > 0
+    ? line.runs.map(run => ({
+        text: run.text.replace(/\s+/g, ' '),
+        font: run.font ?? null,
+        fontKey: run.fontKey ?? null,
+        bold: run.bold ?? false
+      }))
+    : [{
+        text: line.text.replace(/\s+/g, ' '),
+        font: line.font ?? null,
+        fontKey: line.fontKey ?? null,
+        bold: line.bold ?? false
+      }]
+  const merged = runs.filter(run => run.text.length > 0)
+  if (merged.length > 0) {
+    merged[0] = { ...merged[0], text: merged[0].text.replace(/^\s+/, '') }
+    const last = merged[merged.length - 1]
+    merged[merged.length - 1] = { ...last, text: last.text.replace(/\s+$/, '') }
+  }
+  return merged
+}
+
+/** 折行：把下一行的段接上，中间该不该补空格跟 joinText 一个规则。 */
+function appendRuns(target: ParagraphRun[], next: ParagraphRun[]): void {
+  if (next.length === 0) {
+    return
+  }
+  const last = target[target.length - 1]
+  if (last && /[A-Za-z0-9)]$/.test(last.text) && /^[A-Za-z0-9(]/.test(next[0].text)) {
+    target[target.length - 1] = { ...last, text: `${last.text} ` }
+  }
+  target.push(...next)
 }
 
 /** 一块里相邻两行的基线间距中位数（正数、排除离谱值）。 */
 function medianPitch(lines: TextLine[]): number {
   const diffs: number[] = []
   for (let i = 1; i < lines.length; i += 1) {
-    const dy = lines[i].y - lines[i - 1].y
-    if (dy > 4 && dy < 120) {
+    const previous = lines[i - 1]
+    const line = lines[i]
+    const size = Math.max(sizeOf(previous), sizeOf(line))
+    const dy = line.y - previous.y
+    // 只信"字号相近的两行"之间的距离：个人信息那种 24pt 的名字 / 20pt 的"个人简历" /
+    // 14pt 的正文混排，把大间隔算进来行距会被拉成三倍
+    const sameSize = Math.abs(sizeOf(previous) - sizeOf(line)) <= size * 0.2
+    if (sameSize && dy > size * 0.8 && dy < size * 2.4) {
       diffs.push(dy)
     }
   }
@@ -166,6 +252,10 @@ function medianPitch(lines: TextLine[]): number {
   return diffs[Math.floor(diffs.length / 2)]
 }
 
+function sizeOf(line: TextLine): number {
+  return line.fontSize || line.size
+}
+
 /** 一个段落内部（折行折出来的几行）的间距。 */
 function pitchOf(ys: number[]): number {
   if (ys.length < 2) {
@@ -174,14 +264,6 @@ function pitchOf(ys: number[]): number {
   const min = Math.min(...ys)
   const max = Math.max(...ys)
   return (max - min) / (ys.length - 1)
-}
-
-/** 中文直接接，英文/数字之间补一个空格，避免 "Spring Boot和" 这种粘连。 */
-function joinText(head: string, tail: string): string {
-  const lastChar = head.slice(-1)
-  const firstChar = tail.slice(0, 1)
-  const needSpace = /[A-Za-z0-9)]/.test(lastChar) && /[A-Za-z0-9(]/.test(firstChar)
-  return needSpace ? `${head} ${tail}` : `${head}${tail}`
 }
 
 function escapeHtml(value: string): string {
@@ -195,22 +277,41 @@ function escapeHtml(value: string): string {
 /**
  * 生成编辑器初始 HTML。
  *
- * `scale` 是页面当前的缩放倍数：编辑框里按 scale 放大字号和行距，看起来就和上面那张纸一样大，
- * 字体也用 PDF 里的那一个（楷体就是楷体），不至于一进编辑框就变成另一种排版。
+ * `scale` 是页面当前的缩放倍数：编辑框里按 scale 放大字号和行距，看起来就和上面那张纸一样大。
+ * 字体优先用简历里嵌的那份（{@link EmbeddedFamilies}），没有才按名字猜系统字体——
+ * 这样"楷体"就是纸上那个楷体，不会一进编辑框就换一副字形。
  */
-export function toSeedHtml(lines: TextLine[], pageRight: number, scale = 1): string {
+export function toSeedHtml(
+  lines: TextLine[],
+  pageRight: number,
+  scale = 1,
+  families?: EmbeddedFamilies
+): string {
   const paragraphs = toParagraphs(lines, pageRight)
   return paragraphs
     .map(paragraph => {
       const size = paragraph.size * scale
+      const baseFamily = resolveFamily(paragraph.fontKey, paragraph.font, families)
+      const baseWeight = paragraph.bold ? 700 : 400
       const style = [
-        `font-family:${cssFamily(paragraph.font)}`,
+        `font-family:${baseFamily}`,
         `font-size:${Math.round(size * 10) / 10}px`,
         `line-height:${Math.round(paragraph.lineHeight * scale * 10) / 10}px`,
         `margin:0 0 ${Math.round(paragraph.size * 0.2 * scale * 10) / 10}px 0`,
-        `font-weight:${paragraph.bold ? 700 : 400}`
+        `font-weight:${baseWeight}`
       ].join(';')
-      return `<div style="${style}">${escapeHtml(paragraph.text)}</div>`
+      const inner = paragraph.runs
+        .map(run => {
+          const family = resolveFamily(run.fontKey, run.font, families)
+          const weight = run.bold ? 700 : 400
+          if (family === baseFamily && weight === baseWeight) {
+            return escapeHtml(run.text)
+          }
+          // 行内换字体要保留：正文里的数字和英文在原文件里本来就不是中文字体
+          return `<span style="font-family:${family};font-weight:${weight}">${escapeHtml(run.text)}</span>`
+        })
+        .join('')
+      return `<div style="${style}">${inner || escapeHtml(paragraph.text)}</div>`
     })
     .join('')
 }
