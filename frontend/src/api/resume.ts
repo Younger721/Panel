@@ -4,7 +4,8 @@ import type {
   HighlightView,
   PreviewView,
   QuoteRequest,
-  ResumeView
+  ResumeView,
+  TextLayerView
 } from '@/types/api'
 
 /** 统一返回已经拆掉 ApiResponse 外壳的业务数据。 */
@@ -32,6 +33,11 @@ export const resumeApi = {
     return apiClient.get<unknown, PreviewView>(`/v1/interview/resumes/${id}/preview`)
   },
 
+  /** 文字图层：每页尺寸 + 逐行文本与坐标（PDF 原位编辑用）。 */
+  textLayer(id: number): Promise<TextLayerView> {
+    return apiClient.get<unknown, TextLayerView>(`/v1/interview/resumes/${id}/preview/text`)
+  },
+
   /** 单页渲染图；2.5 倍分辨率约等于 180 DPI，放大看也不糊。 */
   pageImage(id: number, page: number, scale = 2.5): Promise<Blob> {
     return requestBlob(`/v1/interview/resumes/${id}/preview/pages/${page}?scale=${scale}`)
@@ -46,9 +52,10 @@ export const resumeApi = {
 
   /**
    * 编辑器保存：正文写回成新的原文并重新排队解析（202，状态回到 PENDING）。
+   * edits 只给 PDF 原位编辑用——行索引 → 新文本，用来还原编辑器里的显形文字。
    */
-  saveContent(id: number, text: string, html?: string): Promise<ResumeView> {
-    return apiClient.put<unknown, ResumeView>(`/v1/interview/resumes/${id}/content`, { text, html })
+  saveContent(id: number, text: string, html?: string, edits?: Record<string, string>): Promise<ResumeView> {
+    return apiClient.put<unknown, ResumeView>(`/v1/interview/resumes/${id}/content`, { text, html, edits })
   },
 
   /** 原文不变，只重跑解析与批注。 */

@@ -69,7 +69,9 @@ public class ResumeController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ApiResponse<ResumeView> updateContent(@PathVariable Long id, @RequestBody ContentUpdate body) {
         require("resume:write");
-        return ApiResponse.success(service.saveContent(id, body == null ? null : body.text()));
+        return ApiResponse.success(service.saveContent(id,
+                body == null ? null : body.text(),
+                body == null ? null : body.edits()));
     }
 
     /** 原文不变，只重跑解析与批注（模型升级，或上一次结果不满意）。 */
@@ -80,8 +82,11 @@ public class ResumeController {
         return ApiResponse.success(service.reanalyze(id));
     }
 
-    /** html 目前只用于日志/排查，落库的是纯文本。 */
-    public record ContentUpdate(String text, String html) {
+    /**
+     * html 目前只用于日志/排查，落库的是纯文本；edits 是 PDF 原位编辑的行改动
+     * （行索引 → 新文本），只用来还原编辑器里的显形文字。
+     */
+    public record ContentUpdate(String text, String html, Map<String, String> edits) {
     }
 
     @GetMapping("/{id}")
@@ -108,6 +113,13 @@ public class ResumeController {
     public ApiResponse<ResumePreviewService.PreviewView> preview(@PathVariable Long id) {
         require("resume:read");
         return ApiResponse.success(previewService.preview(id));
+    }
+
+    /** 文字图层：每页尺寸 + 逐行文本与坐标，供"PDF 原样编辑"用。 */
+    @GetMapping("/{id}/preview/text")
+    public ApiResponse<ResumePreviewService.TextLayerView> previewText(@PathVariable Long id) {
+        require("resume:read");
+        return ApiResponse.success(previewService.textLayer(id));
     }
 
     /** 单页渲染图（PNG）。按内容哈希缓存，滚动多页也不会重复渲染。 */

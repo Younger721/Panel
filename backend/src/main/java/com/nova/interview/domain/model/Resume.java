@@ -34,6 +34,26 @@ public class Resume {
     @Column(nullable = false, length = 64)
     private String contentHash;
 
+    /**
+     * 原始上传文件（编辑器改过之后，{@link #objectKey} 指向新的文本，这里仍指向原件）。
+     *
+     * <p>PDF 的"原版预览"和保真编辑都要读原件，不能被「保存」覆盖掉。</p>
+     */
+    @Column(length = 512)
+    private String sourceObjectKey;
+
+    @Column(length = 128)
+    private String sourceContentType;
+
+    /**
+     * PDF 原位编辑留下的行改动（JSON：行索引 → 新文本）。
+     *
+     * <p>原件不能被改，所以"看到的改动"得单独存一份：再次打开编辑器时，
+     * 文字层按这份数据还原，换浏览器也一样。</p>
+     */
+    @Column(columnDefinition = "TEXT")
+    private String editLayer;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ResumeStatus status = ResumeStatus.PENDING;
@@ -56,6 +76,8 @@ public class Resume {
         resume.contentType = contentType;
         resume.objectKey = objectKey;
         resume.contentHash = contentHash;
+        resume.sourceObjectKey = objectKey;
+        resume.sourceContentType = contentType;
         resume.status = ResumeStatus.PENDING;
         return resume;
     }
@@ -99,6 +121,12 @@ public class Resume {
      * 只是 objectKey 指向新的对象，旧对象保留，出问题还能追溯。</p>
      */
     public void replaceSource(String fileName, String contentType, String objectKey, String contentHash) {
+        // 第一次改之前先把"原件"记下来：老数据没有 source_* 字段，这里补一次快照，
+        // 之后 PDF 的原版预览/保真编辑仍然读得到最初那份文件
+        if (sourceObjectKey == null || sourceObjectKey.isBlank()) {
+            sourceObjectKey = this.objectKey;
+            sourceContentType = this.contentType;
+        }
         this.fileName = fileName;
         this.contentType = contentType;
         this.objectKey = objectKey;
@@ -144,6 +172,24 @@ public class Resume {
 
     public String getContentHash() {
         return contentHash;
+    }
+
+    /** 原件位置；老数据没有这两个字段时退回当前对象，行为与从前一致。 */
+    public String getSourceObjectKey() {
+        return sourceObjectKey == null || sourceObjectKey.isBlank() ? objectKey : sourceObjectKey;
+    }
+
+    public String getSourceContentType() {
+        return sourceContentType == null || sourceContentType.isBlank() ? contentType : sourceContentType;
+    }
+
+    /** 传 null 表示清空（行改动全部还原）。 */
+    public void applyEditLayer(String json) {
+        this.editLayer = json == null || json.isBlank() ? null : json;
+    }
+
+    public String getEditLayer() {
+        return editLayer;
     }
 
     public ResumeStatus getStatus() {

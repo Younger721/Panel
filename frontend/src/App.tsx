@@ -72,14 +72,8 @@ export default function App() {
           </Shell>
         }
       />
-      <Route
-        path="/resume-editor"
-        element={
-          <Shell>
-            <ResumeEditorPage />
-          </Shell>
-        }
-      />
+      {/* 编辑器只能从简历库进入：没有选简历就直接回列表 */}
+      <Route path="/resume-editor" element={<Navigate to="/resumes" replace />} />
       <Route
         path="/resume-editor/:resumeId"
         element={

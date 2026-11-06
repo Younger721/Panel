@@ -38,6 +38,7 @@ public final class PdfPreview implements AutoCloseable {
     private final PDFRenderer renderer;
     private final List<PageInfo> pages;
     private List<PageText> pageTexts;
+    private List<LineBox> lineBoxes;
 
     private PdfPreview(PDDocument document) {
         this.document = document;
@@ -91,6 +92,29 @@ public final class PdfPreview implements AutoCloseable {
             pageTexts = extract();
         }
         return pageTexts;
+    }
+
+    /**
+     * 逐"行片段"的文本 + 页面矩形，用于把文字叠回渲染图上做原位编辑。
+     *
+     * <p>粒度就是 PDFTextStripper 的一次回调：同一视觉行的左右两栏会分成两段，
+     * 这正好是编辑需要的粒度——改左边不会碰到右边。</p>
+     */
+    public List<LineBox> textLines() {
+        if (lineBoxes == null) {
+            Collector collector = new Collector();
+            try {
+                collector.getText(document);
+            } catch (IOException ex) {
+                throw new IllegalStateException("提取 PDF 文本失败", ex);
+            }
+            List<LineBox> lines = new ArrayList<>();
+            for (PageInfo info : pages) {
+                lines.addAll(collector.linesOf(info.index()));
+            }
+            lineBoxes = List.copyOf(lines);
+        }
+        return lineBoxes;
     }
 
     /**
@@ -261,6 +285,19 @@ public final class PdfPreview implements AutoCloseable {
         return Float.isFinite(value) && value > 0.5f ? value : 1f;
     }
 
+    /** 图标字体的私用区字符：看不见也没法编辑，别让它占着一个可点的框。 */
+    private static boolean isDecorative(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            boolean icon = (c >= '\uE000' && c <= '\uF8FF') || Character.isISOControl(c);
+            boolean blank = Character.isWhitespace(c) || c == '\u00A0';
+            if (!icon && !blank) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static Normalized normalize(CharSequence raw) {
         if (raw == null) {
             return new Normalized("", new int[0]);
@@ -317,6 +354,14 @@ public final class PdfPreview implements AutoCloseable {
     public record Highlight(int page, List<Rect> rects) {
     }
 
+    /**
+     * 一段可原位编辑的文字：坐标原点为页面左上角，单位 PDF 点。
+     *
+     * @param size 字号（pt），前端按它渲染覆盖层，才能和底图对得上
+     */
+    public record LineBox(int page, String text, float x, float y, float width, float height, float size) {
+    }
+
     public record Rect(float x, float y, float width, float height) {
 
         public Rect union(Rect other) {
@@ -332,6 +377,7 @@ public final class PdfPreview implements AutoCloseable {
     private static final class Collector extends PDFTextStripper {
 
         private final Map<Integer, List<TextPosition>> byPage = new LinkedHashMap<>();
+        private final Map<Integer, List<LineBox>> byPageLines = new LinkedHashMap<>();
 
         Collector() {
             super();
@@ -348,11 +394,46 @@ public final class PdfPreview implements AutoCloseable {
             if (textPositions == null || textPositions.isEmpty()) {
                 return;
             }
-            byPage.computeIfAbsent(getCurrentPageNo(), key -> new ArrayList<>()).addAll(textPositions);
+            int page = getCurrentPageNo();
+            byPage.computeIfAbsent(page, key -> new ArrayList<>()).addAll(textPositions);
+
+            String value = text == null ? "" : text.replace('\r', ' ').replace('\n', ' ').strip();
+            if (value.isEmpty() || isDecorative(value)) {
+                return;
+            }
+            float left = Float.MAX_VALUE;
+            float top = Float.MAX_VALUE;
+            float right = -Float.MAX_VALUE;
+            float bottom = -Float.MAX_VALUE;
+            float size = 0f;
+            for (TextPosition position : textPositions) {
+                String unicode = position.getUnicode();
+                if (unicode == null || unicode.isEmpty()) {
+                    continue;
+                }
+                float width = Math.max(0.1f, Math.abs(position.getWidthDirAdj()));
+                float font = position.getFontSizeInPt();
+                float band = font > 1f ? font : Math.abs(safe(position.getHeightDir())) * 2f;
+                float y0 = position.getYDirAdj() - band * 0.92f;
+                left = Math.min(left, position.getXDirAdj());
+                right = Math.max(right, position.getXDirAdj() + width);
+                top = Math.min(top, y0);
+                bottom = Math.max(bottom, y0 + band * 1.12f);
+                size = Math.max(size, band);
+            }
+            if (right <= left || size <= 0f) {
+                return;
+            }
+            byPageLines.computeIfAbsent(page, key -> new ArrayList<>())
+                    .add(new LineBox(page, value, left, top, right - left, bottom - top, size));
         }
 
         List<TextPosition> positionsOf(int pageNumber) {
             return byPage.getOrDefault(pageNumber, List.of());
+        }
+
+        List<LineBox> linesOf(int pageNumber) {
+            return byPageLines.getOrDefault(pageNumber, List.of());
         }
     }
 }

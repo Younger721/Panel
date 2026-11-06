@@ -91,6 +91,45 @@ class PdfPreviewTest {
         }
     }
 
+    /**
+     * 文字图层：每行片段都要有能在页面上"叠回去"的坐标和字号。
+     *
+     * <p>这是 PDF 原位编辑的地基——坐标偏一点，覆盖层就和底图对不上；
+     * 字号缺失，改完的字大小和原文不一致，一眼就看出是贴上去的。</p>
+     */
+    @Test
+    void exposesEditableTextLinesWithPageCoordinates() throws Exception {
+        byte[] pdf = chineseResumePdf();
+        try (PdfPreview preview = PdfPreview.open(pdf)) {
+            PdfPreview.PageInfo page = preview.pages().get(0);
+            List<PdfPreview.LineBox> lines = preview.textLines();
+            assertTrue(lines.size() >= 10, "应当按行切出文字片段，实际 " + lines.size());
+            assertEquals(1, lines.stream().map(PdfPreview.LineBox::page).distinct().count());
+
+            PdfPreview.LineBox header = lines.stream()
+                    .filter(line -> line.text().contains("教育背景"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(12f, header.size(), 0.6f, "字号应当来自 PDF 本身");
+            assertTrue(header.x() > 40f && header.x() < 60f, "x: " + header.x());
+            // A4 高 842，测试里基线写在 700（距底）→ 距顶约 130
+            assertTrue(header.y() > 110f && header.y() < 150f, "y: " + header.y());
+            assertTrue(header.width() > 20f, "width: " + header.width());
+            assertTrue(header.height() >= header.size(), "行高至少要容得下字号");
+
+            for (PdfPreview.LineBox line : lines) {
+                assertTrue(line.x() >= 0f && line.x() < page.width(), "x 越界: " + line.x());
+                assertTrue(line.y() >= 0f && line.y() < page.height(), "y 越界: " + line.y());
+                assertTrue(line.x() + line.width() <= page.width() + 1f, "右边界越界: " + line.text());
+                assertTrue(line.y() + line.height() <= page.height() + 1f, "下边界越界: " + line.text());
+                assertTrue(!line.text().isBlank(), "空行不该出现在图层里");
+            }
+
+            // 同一视觉行的左右两段应当是两条，改左边不会把右边糊掉
+            assertTrue(lines.stream().anyMatch(line -> line.text().contains("性") && line.text().contains("男")));
+        }
+    }
+
     @Test
     void rendersChineseSampleForVisualInspection() throws Exception {
         Path font = Path.of("C:\\Windows\\Fonts\\simhei.ttf");

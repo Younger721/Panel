@@ -5,7 +5,6 @@ import {
   FileStack,
   LogOut,
   MessageSquare,
-  PenLine,
   Sparkles,
   Upload,
   Users
@@ -28,12 +27,6 @@ const NAV_GROUPS: { id: string; title: string; items: NavItem[] }[] = [
     items: [
       { path: '/', label: '上传简历', description: 'AI 分析简历', icon: Upload },
       { path: '/resumes', label: '简历库', description: '管理所有简历', icon: FileStack },
-      {
-        path: '/resume-editor',
-        label: '简历编辑器',
-        description: '动态修改与排版',
-        icon: PenLine
-      },
       { path: '/history', label: '面试记录', description: '查看面试历史', icon: Users }
     ]
   },

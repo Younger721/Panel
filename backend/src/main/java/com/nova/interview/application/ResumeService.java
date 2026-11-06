@@ -18,6 +18,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -32,6 +33,8 @@ public class ResumeService {
     private static final long MAX_BYTES = 10L * 1024 * 1024;
     /** 编辑器回写的正文上限，比原文件宽松：纯文本 20 万字符已远超正常简历 */
     private static final int MAX_TEXT_CHARS = 200_000;
+    /** 单次保存最多接受这么多行改动（一页简历的行数远小于此） */
+    private static final int MAX_EDIT_LINES = 5_000;
 
     private final ResumeRepository resumes;
     private final ResumeProfileRepository profiles;
@@ -117,10 +120,11 @@ public class ResumeService {
      * <p>存成 text/plain 而不是改 DOCX：编辑器产出的就是纯文本，
      * 假装回写二进制格式只会让解析器多做一次无意义的转换。</p>
      *
-     * @param text 编辑器里的正文（纯文本，换行即分段）
+     * @param text  编辑器里的正文（纯文本，换行即分段）
+     * @param edits PDF 原位编辑的"行索引 → 新文本"，随内容一起存，换设备打开也能看到改动
      */
     @Transactional
-    public ResumeView saveContent(Long id, String text) {
+    public ResumeView saveContent(Long id, String text, Map<String, String> edits) {
         Resume resume = require(id);
         if (inFlight(resume)) {
             throw new BusinessException(ErrorCode.CONFLICT);
@@ -136,9 +140,25 @@ public class ResumeService {
         String objectKey = "resume/" + resume.getId() + "/edited-" + Instant.now().toEpochMilli() + ".txt";
         store.put(objectKey, bytes, "text/plain");
         resume.replaceSource(textName(resume.getFileName()), "text/plain", objectKey, sha256(bytes));
+        resume.applyEditLayer(editLayer(edits));
         resumes.save(resume);
         jobs.enqueue(ResumeParseWorker.JOB_TYPE + ":" + resume.getId(), null);
         return view(resume);
+    }
+
+    /** 行改动只在 PDF 原位编辑里产生，超过这个量说明请求不正常。 */
+    private String editLayer(Map<String, String> edits) {
+        if (edits == null || edits.isEmpty()) {
+            return null;
+        }
+        if (edits.size() > MAX_EDIT_LINES) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        try {
+            return objectMapper.writeValueAsString(edits);
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
     }
 
     /** 原文不变，重跑解析 + 批注（模型升级或结果不满意时用）。 */

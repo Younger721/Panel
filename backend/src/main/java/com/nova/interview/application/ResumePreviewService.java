@@ -1,5 +1,7 @@
 package com.nova.interview.application;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nova.interview.domain.model.Resume;
 import com.nova.interview.domain.repository.ResumeRepository;
 import com.nova.interview.infrastructure.pdf.PdfPreview;
@@ -36,10 +38,12 @@ public class ResumePreviewService {
 
     private final ResumeRepository resumes;
     private final KnowledgeObjectStore store;
+    private final ObjectMapper objectMapper;
 
-    public ResumePreviewService(ResumeRepository resumes, KnowledgeObjectStore store) {
+    public ResumePreviewService(ResumeRepository resumes, KnowledgeObjectStore store, ObjectMapper objectMapper) {
         this.resumes = resumes;
         this.store = store;
+        this.objectMapper = objectMapper;
     }
 
     /** 只描述页面尺寸；图片由 {@link #pageImage} 单独取，避免一次性传几 MB。 */
@@ -61,8 +65,51 @@ public class ResumePreviewService {
         }
     }
 
-    public byte[] pageImage(Long resumeId, int pageNumber, Float scale) {
+    /**
+     * 文字图层：每页的页面尺寸 + 逐行片段的文本与坐标。
+     *
+     * <p>前端把页面位图当底图、把这些片段定位叠上去，就得到"和 PDF 一模一样、
+     * 但点一下就能改字"的编辑器。非 PDF 返回空图层，前端退回结构化编辑器。</p>
+     */
+    public TextLayerView textLayer(Long resumeId) {
         Resume resume = require(resumeId);
+        if (!isPdf(resume)) {
+            return new TextLayerView(false, "非 PDF 文件没有原版版面，这里用结构化编辑器改文字", List.of(), List.of(), Map.of());
+        }
+        byte[] bytes = original(resume);
+        Map<String, String> edits = storedEdits(resume);
+        try (PdfPreview pdf = PdfPreview.open(bytes)) {
+            List<PageView> pages = pdf.pages().stream()
+                    .map(info -> new PageView(info.index(), info.width(), info.height()))
+                    .toList();
+            List<LineView> lines = pdf.textLines().stream()
+                    .map(line -> new LineView(line.page(), line.text(),
+                            round(line.x()), round(line.y()), round(line.width()), round(line.height()),
+                            Math.round(line.size() * 10f) / 10f))
+                    .toList();
+            return new TextLayerView(true, null, pages, lines, edits);
+        } catch (RuntimeException ex) {
+            log.warn("Resume text layer unavailable: id={}, error={}", resumeId, ex.toString());
+            return new TextLayerView(false, "无法读取 PDF 文本层，已切换为结构化编辑器", List.of(), List.of(), Map.of());
+        }
+    }
+
+    /** 上一次保存留下的行改动；解析不了就当没有，不能让坏 JSON 把编辑器挡住。 */
+    private Map<String, String> storedEdits(Resume resume) {
+        String json = resume.getEditLayer();
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() {
+            });
+        } catch (Exception ex) {
+            log.warn("Resume edit layer unreadable: id={}, error={}", resume.getId(), ex.toString());
+            return Map.of();
+        }
+    }
+
+    public byte[] pageImage(Long resumeId, int pageNumber, Float scale) {        Resume resume = require(resumeId);
         if (!isPdf(resume)) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -126,7 +173,7 @@ public class ResumePreviewService {
     }
 
     private byte[] original(Resume resume) {
-        byte[] bytes = store.read(resume.getObjectKey());
+        byte[] bytes = store.read(resume.getSourceObjectKey());
         if (bytes == null || bytes.length == 0) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -134,7 +181,7 @@ public class ResumePreviewService {
     }
 
     private static boolean isPdf(Resume resume) {
-        String type = resume.getContentType() == null ? "" : resume.getContentType().toLowerCase(Locale.ROOT);
+        String type = resume.getSourceContentType() == null ? "" : resume.getSourceContentType().toLowerCase(Locale.ROOT);
         String name = resume.getFileName() == null ? "" : resume.getFileName().toLowerCase(Locale.ROOT);
         return type.contains("pdf") || name.endsWith(".pdf");
     }
@@ -160,6 +207,14 @@ public class ResumePreviewService {
     }
 
     public record PreviewView(boolean available, String reason, List<PageView> pages) {
+    }
+
+    /** 可原位编辑的文字层。 */
+    public record TextLayerView(boolean available, String reason, List<PageView> pages, List<LineView> lines,
+                                Map<String, String> edits) {
+    }
+
+    public record LineView(int page, String text, float x, float y, float width, float height, float size) {
     }
 
     public record RectView(float x, float y, float width, float height) {

@@ -85,6 +85,26 @@ export interface PreviewView {
   pages: PreviewPage[]
 }
 
+/** 可原位编辑的一行文字：坐标原点为页面左上角，单位 PDF 点 */
+export interface TextLine {
+  page: number
+  text: string
+  x: number
+  y: number
+  width: number
+  height: number
+  size: number
+}
+
+export interface TextLayerView {
+  available: boolean
+  reason: string | null
+  pages: PreviewPage[]
+  lines: TextLine[]
+  /** 已保存的行改动：行索引 → 新文本 */
+  edits: Record<string, string>
+}
+
 export interface HighlightRect {
   x: number
   y: number
