@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } fr
 import { useEffect } from 'react'
 import { getToken, setToken } from '@/api/client'
 import AppLayout from '@/components/AppLayout'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import LoginPage from '@/pages/LoginPage'
 import UploadPage from '@/pages/UploadPage'
 import ResumeListPage from '@/pages/ResumeListPage'
@@ -23,7 +24,9 @@ function Guard({ children }: { children: React.ReactNode }) {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <Guard>
-      <AppLayout>{children}</AppLayout>
+      <AppLayout>
+        <ErrorBoundary>{children}</ErrorBoundary>
+      </AppLayout>
     </Guard>
   )
 }

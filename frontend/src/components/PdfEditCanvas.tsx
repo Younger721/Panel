@@ -128,12 +128,21 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
   }, [layer.pages, resumeId])
 
   /**
-   * 把简历里嵌的字体装进浏览器。
+   * 字体家族名（line.fontKey → @font-face 家族名）。
    *
-   * 光按字体名找系统字体是不够的：这份简历存的字体名叫 KaiTi，嵌进去的字形却是宋体味的，
-   * 用系统楷体去还原反而更不像。这里直接拿 PDF 里那份字体字节喂给 @font-face。
+   * 名字在 `/preview/text` 里就有了，不用等字体字节下载完：HTML 先按名字写死，
+   * 等 {@link FontFace} 注册好，浏览器自己就会用上，不必回头改已经填进编辑框的内容
+   * （改 DOM 会把光标和用户刚打的字一起冲掉）。
    */
-  const [fontFamilies, setFontFamilies] = useState<Record<string, string>>({})
+  const families = useMemo(() => {
+    const map: Record<string, string> = {}
+    ;(layer.fonts ?? []).forEach(font => {
+      map[font.key] = font.family
+    })
+    return map
+  }, [layer.fonts])
+
+  /** 把简历里嵌的字体装进浏览器：直接拿 PDF 里那份字体字节喂给 @font-face。 */
   useEffect(() => {
     const fonts = layer.fonts ?? []
     if (fonts.length === 0) {
@@ -152,9 +161,6 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
           }
           document.fonts.add(face)
           faces.push(face)
-          setFontFamilies(current =>
-            current[font.key] === font.family ? current : { ...current, [font.key]: font.family }
-          )
         } catch {
           // 单个字体失败就退回系统字体，不影响编辑
         }
@@ -178,10 +184,10 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     const result = new Map<number, string>()
     layer.sections.forEach(section => {
       const pageOf = section.lines[0]?.page ?? 1
-      result.set(section.index, toSeedHtml(section.lines, right.get(pageOf) ?? 0, zoom, fontFamilies))
+      result.set(section.index, toSeedHtml(section.lines, right.get(pageOf) ?? 0, zoom, families))
     })
     return result
-  }, [layer.pages, layer.sections, zoom, fontFamilies])
+  }, [layer.pages, layer.sections, zoom, families])
 
   const htmlOf = useCallback(
     (index: number) => edits[String(index)] ?? seeds.get(index) ?? '',
@@ -220,27 +226,22 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     }
   }, [active])
 
-  // 字体是异步装进来的：装好时如果编辑框还开着、而且用户还没动过，就换成嵌入字体重灌一次
-  useEffect(() => {
-    const node = editorRef.current
-    const { index, html, seed } = draft.current
-    if (!node || index === null || html.trim() !== seed) {
-      return
-    }
-    const next = htmlOfRef.current(index)
-    if (next.trim() === html.trim()) {
-      return
-    }
-    node.innerHTML = next
-    draft.current = { index, html: next, seed: next.trim() }
-  }, [fontFamilies])
-
+  /**
+   * 把编辑框里的内容收进 edits。
+   *
+   * 以 DOM 为准、`active` 兜底：编辑框开着就一定算「当前这块」，
+   * 否则中途热更新/重挂载导致 draft 丢了索引时，点「完成」会一声不响地什么都不做。
+   */
   const commitDraft = useCallback(() => {
-    const { index, html, seed } = draft.current
-    if (index === null) {
+    const index = draft.current.index ?? active
+    const node = editorRef.current
+    if (index === null || !node) {
       return
     }
-    const value = html.trim()
+    const seed = draft.current.index === index && draft.current.seed
+      ? draft.current.seed
+      : htmlOfRef.current(index).trim()
+    const value = node.innerHTML.trim()
     const next = { ...edits }
     if (!value || value === seed) {
       delete next[String(index)]
@@ -249,7 +250,7 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
     }
     onEditsChange(next)
     draft.current = { index: null, html: '', seed: '' }
-  }, [edits, onEditsChange])
+  }, [active, edits, onEditsChange])
 
   const close = useCallback(
     (commit: boolean) => {
