@@ -109,6 +109,9 @@ export interface TextPart {
 export interface TextSection {
   index: number
   title: string
+  /** 标题那条分隔条的矩形；页首「个人信息」没有标题，为 null */
+  heading: TextPart | null
+  /** 正文区域，跨页的板块有多段（标题不在正文里） */
   parts: TextPart[]
   lines: TextLine[]
 }

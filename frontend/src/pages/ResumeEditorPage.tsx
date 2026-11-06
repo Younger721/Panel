@@ -1,10 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, Loader2, RefreshCw, RotateCcw, Save } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Loader2, Palette, RefreshCw, RotateCcw, Save } from 'lucide-react'
 import { resumeApi } from '@/api/resume'
-import PdfEditSurface, { type PdfEditSurfaceHandle } from '@/components/PdfEditCanvas'
+import PdfEditSurface, {
+  DEFAULT_DIVIDER,
+  type DividerStyle,
+  type PdfEditSurfaceHandle
+} from '@/components/PdfEditCanvas'
 import StructuredEditor from '@/components/StructuredEditor'
 import type { TextLayerView } from '@/types/api'
+
+/** 间隔条样式是全局的：所有简历、所有标题共用一份，存在本机 */
+const DIVIDER_KEY = 'nova-editor-divider:v1'
+
+function loadDivider(): DividerStyle {
+  try {
+    const raw = localStorage.getItem(DIVIDER_KEY)
+    if (raw) {
+      const value = JSON.parse(raw) as Partial<DividerStyle>
+      return {
+        background: value.background ?? DEFAULT_DIVIDER.background,
+        color: value.color ?? DEFAULT_DIVIDER.color,
+        fontSize: typeof value.fontSize === 'number' ? value.fontSize : DEFAULT_DIVIDER.fontSize
+      }
+    }
+  } catch {
+    // 坏配置按默认走
+  }
+  return DEFAULT_DIVIDER
+}
 
 /**
  * 简历编辑页。
@@ -28,6 +52,8 @@ export default function ResumeEditorPage() {
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [divider, setDivider] = useState<DividerStyle>(loadDivider)
+  const [layoutOpen, setLayoutOpen] = useState(false)
 
   const surfaceRef = useRef<PdfEditSurfaceHandle | null>(null)
   const draftKey = numericId ? `nova-pdf-edit:v1:resume-${numericId}` : null
@@ -158,6 +184,18 @@ export default function ResumeEditorPage() {
   }, [goToAnnotations, numericId, saving])
 
   const changedCount = Object.keys(edits).length
+
+  const updateDivider = useCallback((patch: Partial<DividerStyle>) => {
+    setDivider(current => {
+      const next = { ...current, ...patch }
+      try {
+        localStorage.setItem(DIVIDER_KEY, JSON.stringify(next))
+      } catch {
+        // 存不了就只是这次生效
+      }
+      return next
+    })
+  }, [])
   // 保存后文件名会变成 edited.txt，但这里展示的还是原来那份简历的名字
   const displayName = fileName.replace(/\.[^.]+$/, '')
 
@@ -199,6 +237,76 @@ export default function ResumeEditorPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setLayoutOpen(open => !open)}
+              className="btn-ghost border border-slate-200 text-slate-600"
+              title="间隔条样式（全局）"
+            >
+              <Palette className="h-4 w-4" />
+              版式
+            </button>
+            {layoutOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setLayoutOpen(false)} />
+                <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-card">
+                  <div className="mb-2 text-[11px] text-slate-400">
+                    板块标题的间隔条，全局统一
+                  </div>
+                  <label className="mb-2 flex items-center justify-between text-xs text-slate-600">
+                    底色
+                    <input
+                      type="color"
+                      value={divider.background}
+                      onChange={event => updateDivider({ background: event.target.value })}
+                      className="h-6 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5"
+                    />
+                  </label>
+                  <label className="mb-2 flex items-center justify-between text-xs text-slate-600">
+                    文字颜色
+                    <input
+                      type="color"
+                      value={divider.color}
+                      onChange={event => updateDivider({ color: event.target.value })}
+                      className="h-6 w-10 cursor-pointer rounded border border-slate-200 bg-transparent p-0.5"
+                    />
+                  </label>
+                  <label className="mb-2 flex items-center justify-between text-xs text-slate-600">
+                    字号
+                    <select
+                      value={divider.fontSize}
+                      onChange={event => updateDivider({ fontSize: Number(event.target.value) })}
+                      className="rounded-md border border-slate-200 px-1.5 py-0.5 text-xs text-slate-600"
+                    >
+                      {[11, 12, 13, 14, 15, 16, 18, 20].map(size => (
+                        <option key={size} value={size}>
+                          {size} pt
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div
+                    className="mb-2 flex h-7 items-center rounded px-2 text-xs font-semibold"
+                    style={{
+                      background: divider.background,
+                      color: divider.color,
+                      fontSize: divider.fontSize
+                    }}
+                  >
+                    实习经历
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updateDivider(DEFAULT_DIVIDER)}
+                    className="w-full rounded-lg border border-slate-200 py-1 text-[11px] text-slate-500 hover:bg-slate-50"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           {changedCount > 0 && (
             <button
               type="button"
@@ -245,6 +353,7 @@ export default function ResumeEditorPage() {
             layer={layer}
             edits={edits}
             onEditsChange={handleEditsChange}
+            divider={divider}
           />
         )}
       </div>

@@ -309,6 +309,10 @@ public final class PdfPreview implements AutoCloseable {
      * 照片旁的那几行）；每个标题到下一个标题之间算一块。没有标题的页面整页算一块，
      * 这样任何简历都至少有一个可编辑的区域。</p>
      *
+     * <p><b>标题自己不算正文</b>：它是板块的分隔条（{@link SectionBox#heading()}），
+     * 由前端按全局样式画成统一的横条；可编辑的 {@code lines} 从标题下面一行开始。
+     * 这样"教育背景"这类标题不会出现在编辑框里被当成正文改，也不会跟着正文一起被重排。</p>
+     *
      * <p><b>跨页要接回去</b>：上一页写到一半的板块，下一页开头那几行没有标题，
      * 不能单独成块——直接把这几行并进上一块，块里就有了两个 {@link Part}（两页各一段）。
      * 否则「实习经历」会被切成"正文一块 + 接上页一块"，用户点哪块都改不全。</p>
@@ -346,29 +350,40 @@ public final class PdfPreview implements AutoCloseable {
                     previous.ranges.add(new Range(page, pageLines.subList(0, headEnd), true));
                 } else {
                     drafts.add(new Draft(page.index() == 1 ? "个人信息" : "全部内容",
-                            page, pageLines.subList(0, headEnd), true));
+                            page, null, pageLines.subList(0, headEnd), true));
                 }
             }
             for (int i = 0; i < headingAt.size(); i++) {
                 int start = headingAt.get(i);
                 int end = i + 1 < headingAt.size() ? headingAt.get(i + 1) : pageLines.size();
-                drafts.add(new Draft(headingOf(pageLines.get(start)), page,
-                        pageLines.subList(start, end), false));
+                LineBox heading = pageLines.get(start);
+                List<LineBox> content = pageLines.subList(start + 1, end);
+                if (content.isEmpty()) {
+                    // 只有标题没有正文：那就没有可编辑区，标题也就当正文留着
+                    drafts.add(new Draft(headingOf(heading), page, null, List.of(heading), false));
+                } else {
+                    drafts.add(new Draft(headingOf(heading), page, heading, content, false));
+                }
             }
         }
 
         List<SectionBox> result = new ArrayList<>();
         int index = 0;
         for (Draft draft : drafts) {
+            Part bar = draft.heading == null ? null : headingPart(draft.headingPage, draft.heading);
             List<Part> parts = new ArrayList<>();
             List<LineBox> sectionLines = new ArrayList<>();
             for (Range range : draft.ranges) {
                 sectionLines.addAll(range.lines());
                 List<LineBox> sorted = new ArrayList<>(range.lines());
                 sorted.sort(Comparator.comparingDouble(LineBox::y).thenComparingDouble(LineBox::x));
-                parts.add(part(range.page(), sorted, range.untitled()));
+                // 有标题的块：正文从那条间隔条下面开始，别让标题混进可点区域
+                float minTop = bar != null && range.page() == draft.headingPage
+                        ? bar.y() + bar.height() + 2f
+                        : 0f;
+                parts.add(part(range.page(), sorted, range.untitled(), minTop));
             }
-            result.add(new SectionBox(index++, draft.title, List.copyOf(parts), List.copyOf(sectionLines)));
+            result.add(new SectionBox(index++, draft.title, bar, List.copyOf(parts), List.copyOf(sectionLines)));
         }
         sections = List.copyOf(result);
         return sections;
@@ -381,18 +396,34 @@ public final class PdfPreview implements AutoCloseable {
     private record Range(PageInfo page, List<LineBox> lines, boolean untitled) {
     }
 
-    /** 切块过程中的一块：标题 + 若干段（跨页时多段），每段对应一页上的一块矩形。 */
+    /** 切块过程中的一块：标题（分隔条）+ 若干段正文（跨页时多段）。 */
     private static final class Draft {
         private final String title;
+        private final PageInfo headingPage;
+        private final LineBox heading;
         private final List<Range> ranges = new ArrayList<>();
 
-        private Draft(String title, PageInfo page, List<LineBox> lines, boolean untitled) {
+        private Draft(String title, PageInfo page, LineBox heading, List<LineBox> lines, boolean untitled) {
             this.title = title;
+            this.headingPage = page;
+            this.heading = heading;
             this.ranges.add(new Range(page, lines, untitled));
         }
     }
 
-    private static Part part(PageInfo page, List<LineBox> lines, boolean untitled) {
+    /**
+     * 分隔条的矩形：整行宽、比标题行高一点点，正好把原件那条底色带盖住，
+     * 于是所有板块标题看起来是同一种横条（样式由前端全局配置）。
+     */
+    private static Part headingPart(PageInfo page, LineBox heading) {
+        float left = 24f;
+        float right = page.width() - 24f;
+        float top = Math.max(0f, heading.y() - 7f);
+        float bottom = Math.min(page.height(), heading.y() + heading.height() + 7f);
+        return new Part(page.index(), left, top, right - left, bottom - top);
+    }
+
+    private static Part part(PageInfo page, List<LineBox> lines, boolean untitled, float minTop) {
         float minX = Float.MAX_VALUE;
         float minY = Float.MAX_VALUE;
         float maxX = -Float.MAX_VALUE;
@@ -409,7 +440,7 @@ public final class PdfPreview implements AutoCloseable {
         float right = untitled
                 ? Math.min(page.width(), maxX + 6f)
                 : Math.max(page.width() - 24f, maxX + 6f);
-        float top = Math.max(0f, minY - 6f);
+        float top = Math.max(minTop, Math.max(0f, minY - 6f));
         float bottom = Math.min(page.height(), maxY + 8f);
         return new Part(page.index(), left, top, right - left, bottom - top);
     }
@@ -508,11 +539,13 @@ public final class PdfPreview implements AutoCloseable {
     /**
      * 一块可整体编辑的区域（板块）。
      *
-     * @param index 全局顺序，前端用它当"这块被改过"的键
-     * @param title 板块标题，如「实习经历」；页首那块是「个人信息」
-     * @param parts 这一块在页面上占的区域，跨页的板块有多段
+     * @param index   全局顺序，前端用它当"这块被改过"的键
+     * @param title   板块标题，如「实习经历」；页首那块是「个人信息」
+     * @param heading 标题那条分隔条的矩形，没有标题的块为 {@code null}
+     * @param parts   正文在页面上占的区域，跨页的板块有多段
+     * @param lines   正文行（不含标题行）
      */
-    public record SectionBox(int index, String title, List<Part> parts, List<LineBox> lines) {
+    public record SectionBox(int index, String title, Part heading, List<Part> parts, List<LineBox> lines) {
     }
 
     public record Rect(float x, float y, float width, float height) {

@@ -85,10 +85,8 @@ public class ResumePreviewService {
                     .toList();
             List<SectionView> sections = pdf.sections().stream()
                     .map(section -> new SectionView(section.index(), section.title(),
-                            section.parts().stream()
-                                    .map(part -> new PartView(part.page(), round(part.x()), round(part.y()),
-                                            round(part.width()), round(part.height())))
-                                    .toList(),
+                            section.heading() == null ? null : partView(section.heading()),
+                            section.parts().stream().map(ResumePreviewService::partView).toList(),
                             section.lines().stream()
                                     .map(line -> new LineView(line.page(), line.text(),
                                             round(line.x()), round(line.y()), round(line.width()), round(line.height()),
@@ -223,7 +221,12 @@ public class ResumePreviewService {
                                 List<SectionView> sections, Map<String, String> edits) {
     }
 
-    public record SectionView(int index, String title, List<PartView> parts, List<LineView> lines) {
+    public record SectionView(int index, String title, PartView heading, List<PartView> parts,
+                              List<LineView> lines) {
+    }
+
+    private static PartView partView(PdfPreview.Part part) {
+        return new PartView(part.page(), round(part.x()), round(part.y()), round(part.width()), round(part.height()));
     }
 
     public record PartView(int page, float x, float y, float width, float height) {

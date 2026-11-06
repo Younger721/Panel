@@ -17,13 +17,26 @@ import type { TextLayerView, TextSection } from '@/types/api'
 /**
  * PDF 板块编辑器。
  *
- * 底图是原文件渲染的位图，页面看起来和上传的 PDF 一模一样；点某一页上的板块（实习经历、
- * 教育背景……），**下面弹出一个编辑框**整块改，不在原位置动文字。原处只留一个高亮框告诉你
- * 现在改的是哪一块，改过的块打个「已编辑」标。
+ * 底图是原文件渲染的位图，页面看起来就是上传的 PDF；板块**标题**（教育背景、技能特长……）
+ * 不算正文，按全局样式画成统一的间隔条（{@link DividerStyle}），正文则在下面弹出的编辑框里整块改，
+ * 不在原位置动文字。原处只留一个高亮框告诉你现在改的是哪一块，改过的块打个「已编辑」标。
  *
  * 为什么不原位改：PDF 的排版是死的，就地长出来的富文本框会盖住下面的内容，
  * 而且宽度只有一栏，调字号就挤成一团。挪到下面给足宽度，才像在 Word 里改。
  */
+
+/** 板块间隔条的样式：全局一份，所有标题长一样 */
+export interface DividerStyle {
+  background: string
+  color: string
+  fontSize: number
+}
+
+export const DEFAULT_DIVIDER: DividerStyle = {
+  background: '#3f5a80',
+  color: '#ffffff',
+  fontSize: 15
+}
 
 export interface PdfEditSurfaceHandle {
   /** 按阅读顺序拼出正文（包含还没提交的编辑框内容） */
@@ -36,6 +49,7 @@ interface Props {
   layer: TextLayerView
   edits: Record<string, string>
   onEditsChange: (edits: Record<string, string>) => void
+  divider: DividerStyle
 }
 
 const FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32]
@@ -48,7 +62,7 @@ const FONT_FAMILIES = [
 ]
 
 const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCanvas(
-  { resumeId, layer, edits, onEditsChange },
+  { resumeId, layer, edits, onEditsChange, divider },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -316,13 +330,14 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
                 ? draft.current.html
                 : edits[key] ?? seeds.get(section.index) ?? ''
             const seed = (seeds.get(section.index) ?? '').trim()
-            if (html.trim() && html.trim() !== seed) {
-              return htmlToPlainText(html)
-            }
-            return section.lines
-              .map(line => line.text.replace(/\s+/g, ' ').trim())
-              .filter(Boolean)
-              .join('\n')
+            const body =
+              html.trim() && html.trim() !== seed
+                ? htmlToPlainText(html)
+                : joinLines(section.lines.map(line => line.text))
+            // 标题是分隔条不在正文里，但存下来的文本还要有它，否则解析不知道该分到哪一块；
+            // 「个人信息」「全部内容」是切出来的，原件里没有这一行，不补
+            const titled = section.heading ? section.title : ''
+            return titled && !body.trim().startsWith(titled) ? `${titled}\n${body}`.trim() : body
           })
           .filter(Boolean)
           .join('\n\n')
@@ -379,6 +394,36 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
               ) : (
                 <div className="absolute inset-0 animate-pulse bg-slate-50" />
               )}
+
+              {/* 板块标题画成统一的间隔条：原件那条底色带被它盖住，所有标题长得一样 */}
+              {layer.sections.map(section => {
+                const heading = section.heading
+                if (!heading || heading.page !== page.index) {
+                  return null
+                }
+                // 厚度用原件那条底色带的高度（正好盖住它）；字号由全局配置决定
+                const barHeight = heading.height * zoom
+                return (
+                  <div
+                    key={`heading-${section.index}`}
+                    className="pointer-events-none absolute flex items-center overflow-hidden font-semibold tracking-wide"
+                    style={{
+                      left: heading.x * zoom,
+                      top: heading.y * zoom,
+                      width: heading.width * zoom,
+                      height: barHeight,
+                      paddingLeft: 10 * zoom,
+                      borderRadius: 3 * zoom,
+                      background: divider.background,
+                      color: divider.color,
+                      fontSize: divider.fontSize * zoom,
+                      lineHeight: `${barHeight}px`
+                    }}
+                  >
+                    {section.title}
+                  </div>
+                )
+              })}
 
               {layer.sections.map(section => {
                 const parts = section.parts.filter(part => part.page === page.index)
@@ -597,8 +642,27 @@ const PdfEditCanvas = forwardRef<PdfEditSurfaceHandle, Props>(function PdfEditCa
   )
 })
 
-function ZoomControls({
-  zoom,
+const BULLET_ONLY = /^[•·▪◦‣-]$/
+
+/** 视觉行拼回文本：单独一个「•」的行并进下一行，别让它自己占一行 */
+function joinLines(texts: string[]): string {
+  const merged: string[] = []
+  for (const raw of texts) {
+    const text = raw.replace(/\s+/g, ' ').trim()
+    if (!text) {
+      continue
+    }
+    const last = merged[merged.length - 1]
+    if (last !== undefined && BULLET_ONLY.test(last)) {
+      merged[merged.length - 1] = `${last} ${text}`
+    } else {
+      merged.push(text)
+    }
+  }
+  return merged.join('\n')
+}
+
+function ZoomControls({  zoom,
   onZoom,
   onFit,
   compact = false

@@ -166,14 +166,19 @@ class PdfPreviewTest {
                         "板块应当自上而下不重叠: " + sections.get(i - 1).title() + " / " + sections.get(i).title());
             }
 
-            // 标题行本身属于它下面那一块
+            // 标题自己是分隔条，不算正文：标题行留在 heading 里，正文从下一行开始
             PdfPreview.SectionBox education = sections.get(1);
-            assertTrue(education.lines().get(0).text().contains("教育背景"));
-            assertEquals(12f, education.lines().get(0).size(), 0.6f);
+            assertTrue(education.heading() != null, "有标题的板块必须有分隔条矩形");
+            assertTrue(education.heading().width() > page.width() - 60f, "分隔条要占整行宽度");
+            assertTrue(education.heading().y() < education.parts().get(0).y(), "分隔条在正文上方");
+            assertTrue(education.lines().stream().noneMatch(line -> line.text().contains("教育背景")),
+                    "标题不该混进可编辑正文");
+            assertTrue(education.lines().get(0).text().contains("2023.09"), "正文第一行是学段");
 
-            // 页首那块只框文字，别把版头装饰一起盖住
+            // 页首那块没有标题，只框文字，别把版头装饰一起盖住
             PdfPreview.SectionBox header = sections.get(0);
             assertEquals("个人信息", header.title());
+            assertTrue(header.heading() == null, "页首那块没有分隔条");
             assertTrue(header.parts().get(0).width() < page.width() - 40f,
                     "页首块的宽度应当贴合文字: " + header.parts().get(0).width());
         }
@@ -200,7 +205,8 @@ class PdfPreviewTest {
             assertEquals(2, internship.parts().get(1).page());
             assertTrue(internship.lines().stream().anyMatch(line -> line.text().contains("第二页的续写")),
                     "续写的行必须在这一块里");
-            assertTrue(internship.lines().stream().anyMatch(line -> line.text().contains("实习经历")));
+            assertTrue(internship.lines().stream().noneMatch(line -> line.text().contains("实习经历")),
+                    "标题是分隔条，不该出现在正文里");
 
             // 续写那段是"没有标题的"区域，只框文字，不按整行宽度框
             PdfPreview.Part tail = internship.parts().get(1);
