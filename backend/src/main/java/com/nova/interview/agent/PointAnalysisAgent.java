@@ -81,7 +81,10 @@ public class PointAnalysisAgent {
                     cap(strings(node.path("questions")), QUESTIONS_PER_POINT)));
         }
         if (points.isEmpty()) {
-            throw new IllegalStateException("point analysis returned no usable point for module: " + moduleTitle);
+            // 只有姓名/电话的模块（例如「个人介绍」）本来就该零批注：
+            // 指令里明确要求跳过个人信息，这时候报错等于惩罚模型听了话。
+            log.info("Module '{}' has nothing worth commenting on", moduleTitle);
+            return List.of();
         }
         log.info("Module '{}' analyzed into {} points", moduleTitle, points.size());
         return cap(points, maxPoints);

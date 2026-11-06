@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, Eye, Mic, PenLine, Sparkles } from 'lucide-react'
+import { ChevronLeft, Eye, Mic, PenLine, RefreshCw, Sparkles } from 'lucide-react'
 import { resumeApi } from '@/api/resume'
-import type { AnalysisView, Level, PointView, ResumeView } from '@/types/api'
+import type {
+  AnalysisView,
+  HighlightView,
+  Level,
+  PointView,
+  PreviewView,
+  QuoteRequest,
+  ResumeView
+} from '@/types/api'
 import { AnnotationCard } from '@/components/AnnotationCard'
+import { ResumeOriginal, type PageMark } from '@/components/ResumeOriginal'
 import { ResumePaper, type MarkAnchor } from '@/components/ResumePaper'
 
 interface FlatPoint {
@@ -43,6 +52,14 @@ export default function ResumePage() {
   const [tops, setTops] = useState<Record<string, number>>({})
   const [layerHeight, setLayerHeight] = useState(0)
 
+  /** 原版预览：PDF 页面图 + 页面上的批注矩形；不支持时自动留在文本视图。 */
+  const [preview, setPreview] = useState<PreviewView | null>(null)
+  const [pageImages, setPageImages] = useState<string[]>([])
+  const [highlights, setHighlights] = useState<Record<string, HighlightView>>({})
+  const [viewMode, setViewMode] = useState<'original' | 'text'>('text')
+  const [reparsing, setReparsing] = useState<string | null>(null)
+  const [reloadToken, setReloadToken] = useState(0)
+
   const containerRef = useRef<HTMLDivElement | null>(null)
   const paperRef = useRef<HTMLDivElement | null>(null)
   const layerRef = useRef<HTMLDivElement | null>(null)
@@ -51,30 +68,128 @@ export default function ResumePage() {
 
   useEffect(() => {
     let cancelled = false
+    let timer: number | undefined
     setLoading(true)
-    Promise.all([resumeApi.analysis(resumeId), resumeApi.find(resumeId).catch(() => null)])
-      .then(([view, meta]) => {
+
+    // 重新分析时状态会回到 PENDING，这里跟着轮询，PARSED 后批注自动换新
+    const poll = async () => {
+      const meta = await resumeApi.find(resumeId).catch(() => null)
+      if (cancelled) {
+        return
+      }
+      const settled = !meta || meta.status === 'PARSED'
+      try {
+        const view = await resumeApi.analysis(resumeId)
         if (cancelled) {
           return
         }
         setAnalysis(view)
-        setResume(meta)
         setError(null)
-      })
-      .catch(err => {
-        if (!cancelled) {
+      } catch (err) {
+        if (cancelled) {
+          return
+        }
+        // 正在重算时旧分析可能已经不存在，这不算错误
+        if (settled) {
           setError(err instanceof Error ? err.message : '加载失败')
         }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      })
+      }
+      setResume(meta)
+      setLoading(false)
+      if (settled) {
+        setReparsing(null)
+      } else {
+        setReparsing(meta.status)
+        timer = window.setTimeout(() => void poll(), 3000)
+      }
+    }
+
+    void poll()
     return () => {
       cancelled = true
+      if (timer) {
+        window.clearTimeout(timer)
+      }
+    }
+  }, [resumeId, reloadToken])
+
+  const reanalyze = useCallback(async () => {
+    try {
+      await resumeApi.reanalyze(resumeId)
+      setReparsing('PENDING')
+      setReloadToken(value => value + 1)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重新分析失败')
     }
   }, [resumeId])
+
+  const blockTexts = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const block of analysis?.blocks ?? []) {
+      map.set(block.id, block.text)
+    }
+    return map
+  }, [analysis])
+
+  // 分析结果一到就取原版预览：先取页面尺寸，再并行取每页图片，最后定位批注。
+  // 任何一步失败都静默退回文本视图，批注页本身仍然可用。
+  useEffect(() => {
+    if (!analysis) {
+      return
+    }
+    let cancelled = false
+    const objectUrls: string[] = []
+
+    const load = async () => {
+      setPreview(null)
+      setPageImages([])
+      setHighlights({})
+      setViewMode('text')
+      try {
+        const view = await resumeApi.preview(resumeId)
+        if (cancelled) {
+          return
+        }
+        if (!view.available || view.pages.length === 0) {
+          setPreview(view)
+          return
+        }
+        const blobs = await Promise.all(view.pages.map(page => resumeApi.pageImage(resumeId, page.index)))
+        if (cancelled) {
+          return
+        }
+        blobs.forEach(blob => objectUrls.push(window.URL.createObjectURL(blob)))
+        setPageImages([...objectUrls])
+        setPreview(view)
+        setViewMode('original')
+
+        const quotes: QuoteRequest[] = analysis.modules.flatMap(module =>
+          module.points.map(point => ({
+            pointId: point.id,
+            quote: point.quote,
+            fallback: point.anchor?.blockId ? blockTexts.get(point.anchor.blockId) ?? null : null
+          }))
+        )
+        if (quotes.length > 0) {
+          const located = await resumeApi.locate(resumeId, quotes).catch(() => ({}))
+          if (!cancelled) {
+            setHighlights(located)
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setPreview(null)
+          setViewMode('text')
+        }
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+      objectUrls.forEach(url => window.URL.revokeObjectURL(url))
+    }
+  }, [resumeId, analysis, blockTexts])
 
   const visiblePoints = useMemo<FlatPoint[]>(() => {
     if (!analysis) {
@@ -105,6 +220,25 @@ export default function ResumePage() {
     }
     return map
   }, [visiblePoints])
+
+  /** 原版页面上的一批高亮框；只在原版视图下生成，按批注等级着色。 */
+  const pageMarks = useMemo<PageMark[]>(() => {
+    if (viewMode !== 'original') {
+      return []
+    }
+    const levels = new Map(visiblePoints.map(({ point }) => [point.id, point.level]))
+    const marks: PageMark[] = []
+    for (const [pointId, highlight] of Object.entries(highlights)) {
+      const level = levels.get(pointId)
+      if (!level) {
+        continue
+      }
+      highlight.rects.forEach((rect, index) => {
+        marks.push({ pointId, level, page: highlight.page, rect, first: index === 0 })
+      })
+    }
+    return marks
+  }, [viewMode, visiblePoints, highlights])
 
   const registerMark = useCallback((pointId: string, el: HTMLElement | null) => {
     if (el) {
@@ -185,6 +319,16 @@ export default function ResumePage() {
       nextTops[item.id] = Math.round(top)
     }
 
+    // 原版页面上没定位到的批注（扫描件、模型改写过的引用）依次排到末尾，
+    // 否则它们会全部堆在 0 重叠成一摞。
+    let tail = items.length > 0 ? previous + MIN_STEP : 0
+    for (const { point } of visiblePoints) {
+      if (nextTops[point.id] === undefined) {
+        nextTops[point.id] = Math.round(tail)
+        tail += MIN_STEP
+      }
+    }
+
     setTops(current => {
       const keys = Object.keys(nextTops)
       if (keys.length === Object.keys(current).length && keys.every(key => current[key] === nextTops[key])) {
@@ -202,7 +346,7 @@ export default function ResumePage() {
         : lines
     )
 
-    setLayerHeight(Math.max(paperRect.bottom - layerRect.top, previous + 160))
+    setLayerHeight(Math.max(paperRect.bottom - layerRect.top, tail + 120))
   }, [visiblePoints])
 
   useLayoutEffect(() => {
@@ -210,6 +354,11 @@ export default function ResumePage() {
     const observer = new ResizeObserver(() => measure())
     if (containerRef.current) {
       observer.observe(containerRef.current)
+    }
+    // 页面图以原始尺寸参与首帧布局、随后被 aspect-ratio 收回来，
+    // 外层的总高可能不变，所以必须直接盯着纸张本身。
+    if (paperRef.current) {
+      observer.observe(paperRef.current)
     }
     const onResize = () => measure()
     window.addEventListener('resize', onResize)
@@ -221,7 +370,9 @@ export default function ResumePage() {
       observer.disconnect()
       window.removeEventListener('resize', onResize)
     }
-  }, [measure])
+    // pageMarks 变化意味着原文上的高亮框刚挂载完，必须再量一次，
+    // 否则切到原版时高亮还没返回，卡片会全部按顺序堆叠。
+  }, [measure, viewMode, pageMarks])
 
   const focusPoint = useCallback((pointId: string) => {
     const mark = markRefs.current.get(pointId)
@@ -247,6 +398,7 @@ export default function ResumePage() {
   }
 
   const stats = analysis.stats
+  const showingOriginal = viewMode === 'original' && preview?.available === true
 
   return (
     <div className="-mx-10 -mt-10 pb-16">
@@ -275,6 +427,28 @@ export default function ResumePage() {
               </span>
             </div>
           </div>
+          {preview?.available && (
+            <div className="flex shrink-0 items-center rounded-xl border border-slate-200 bg-slate-50 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('original')}
+                className={`rounded-[10px] px-3 py-1.5 font-medium transition-colors ${
+                  viewMode === 'original' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                原版
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('text')}
+                className={`rounded-[10px] px-3 py-1.5 font-medium transition-colors ${
+                  viewMode === 'text' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                文本
+              </button>
+            </div>
+          )}
           <button
             onClick={() => setOnlyWeak(value => !value)}
             className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
@@ -294,6 +468,15 @@ export default function ResumePage() {
             <PenLine className="h-4 w-4" />
             编辑
           </Link>
+          <button
+            onClick={() => void reanalyze()}
+            disabled={Boolean(reparsing)}
+            className="btn-ghost shrink-0 border border-slate-200 text-slate-600 disabled:opacity-60"
+            title="原文不变，重跑一遍解析与批注"
+          >
+            <RefreshCw className={`h-4 w-4 ${reparsing ? 'animate-spin' : ''}`} />
+            {reparsing ? '分析中' : '重新分析'}
+          </button>
           <button onClick={() => navigate(`/interview/new?resumeId=${resumeId}`)} className="btn-primary shrink-0">
             <Mic className="h-4 w-4" />
             模拟面试
@@ -327,13 +510,24 @@ export default function ResumePage() {
 
         <div className="grid grid-cols-1 gap-x-11 xl:grid-cols-[minmax(0,700px)_340px]">
           <div ref={paperRef} className="min-w-0">
-            <ResumePaper
-              blocks={analysis.blocks}
-              anchors={anchors}
-              hoveredId={hovered}
-              onHover={setHover}
-              registerMark={registerMark}
-            />
+            {showingOriginal && preview ? (
+              <ResumeOriginal
+                pages={preview.pages}
+                images={pageImages}
+                marks={pageMarks}
+                hoveredId={hovered}
+                onHover={setHover}
+                registerMark={registerMark}
+              />
+            ) : (
+              <ResumePaper
+                blocks={analysis.blocks}
+                anchors={anchors}
+                hoveredId={hovered}
+                onHover={setHover}
+                registerMark={registerMark}
+              />
+            )}
           </div>
 
           <div ref={layerRef} className="relative hidden xl:block" style={{ height: layerHeight }}>

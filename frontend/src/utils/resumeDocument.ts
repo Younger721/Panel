@@ -182,32 +182,40 @@ export function buildEditorDocument(blocks: Block[]): EditorDocument {
       name = parts[0]
     }
   }
-  while (queue.length && queue[0].type !== 'TITLE') {
+  // 扁平文档没有标题块：第一段非联系方式的行当姓名，紧随其后的短句当求职意向
+  if (flat) {
+    while (queue.length && queue[0].type !== 'TITLE') {
+      const text = tidy(queue[0].text)
+      const compact = text.replace(/\s+/g, '')
+      if (!text) {
+        queue.shift()
+        continue
+      }
+      if (/电话|邮箱|@|性别|籍贯|年龄|出生|民族|微信|城市|现居|工作年限|工作经验/.test(compact)) {
+        pushContact(text)
+        queue.shift()
+        continue
+      }
+      if (!name) {
+        name = compact.slice(0, 24)
+        queue.shift()
+        continue
+      }
+      if (sectionRuleOf(compact)) {
+        break
+      }
+      if (!headline && compact.length <= 32 && !/^(19|20)\d{2}/.test(compact)) {
+        headline = compact
+        queue.shift()
+        continue
+      }
+      break
+    }
+  }
+  while (!flat && queue.length && queue[0].type !== 'TITLE') {
     const text = tidy(queue[0].text)
-    const compact = text.replace(/\s+/g, '')
     if (/电话|邮箱|@|微信|城市|现居|工作年限|工作经验/.test(text)) {
       pushContact(text)
-      queue.shift()
-      continue
-    }
-    if (flat && /电话|邮箱|@|性别|籍贯|年龄|出生|民族/.test(compact)) {
-      pushContact(text)
-      queue.shift()
-      continue
-    }
-    if (flat && !name && /^[\u4e00-\u9fa5·]{2,4}$/.test(compact)) {
-      name = compact
-      queue.shift()
-      continue
-    }
-    if (
-      flat &&
-      !headline &&
-      compact.length <= 32 &&
-      /(工程师|开发|经理|设计师|分析师|运营|产品|本科|硕士|博士|学生)/.test(compact) &&
-      !/^(19|20)\d{2}/.test(compact)
-    ) {
-      headline = compact
       queue.shift()
       continue
     }

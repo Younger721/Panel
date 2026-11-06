@@ -69,6 +69,10 @@ public class ResumeAnalysisService {
                 continue;
             }
             List<PointAnalysisAgent.PointDraft> points = pointAgent.analyze(draft.title(), text);
+            if (points.isEmpty()) {
+                // 整个模块没有可点评的小点（例如只有联系方式），不必在页面上留一个空标题
+                continue;
+            }
             List<PointView> views = new ArrayList<>();
             for (PointAnalysisAgent.PointDraft point : points) {
                 if (isDuplicate(views, point.quote())) {

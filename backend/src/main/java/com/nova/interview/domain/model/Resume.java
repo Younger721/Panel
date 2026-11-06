@@ -92,6 +92,29 @@ public class Resume {
         touch();
     }
 
+    /**
+     * 编辑器改完回写：换一份新的文本原文，并重新排队解析。
+     *
+     * <p>原文是不可变字节这一条在这里被打破——但新内容本身仍是不可变的，
+     * 只是 objectKey 指向新的对象，旧对象保留，出问题还能追溯。</p>
+     */
+    public void replaceSource(String fileName, String contentType, String objectKey, String contentHash) {
+        this.fileName = fileName;
+        this.contentType = contentType;
+        this.objectKey = objectKey;
+        this.contentHash = contentHash;
+        this.status = ResumeStatus.PENDING;
+        this.lastError = null;
+        touch();
+    }
+
+    /** 原文不变，只重跑解析与分析（模型升级，或上一次结果不满意）。 */
+    public void resetForReparse() {
+        this.status = ResumeStatus.PENDING;
+        this.lastError = null;
+        touch();
+    }
+
     private void touch() {
         this.updatedAt = Instant.now();
     }

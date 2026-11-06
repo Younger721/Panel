@@ -1,0 +1,358 @@
+package com.nova.interview.infrastructure.pdf;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * 原版简历预览：把 PDF 逐页渲染成位图，并保留"字符 → 页面坐标"。
+ *
+ * <p>为什么不用 Markdown/HTML 重排：PDF 里的分栏、右对齐的日期、字号与装饰线
+ * 是排版结果而不是文本语义，重排一定会失真。这里直接渲染原页面，批注只需在
+ * 页面上画框，看起来就和用户上传的文件一模一样。</p>
+ *
+ * <p>坐标统一用 PDF 点（1/72 英寸），原点在页面左上角，且已经过页面旋转修正，
+ * 与 {@link PDFRenderer} 渲染出的位图方向一致。前端按百分比缩放即可。</p>
+ */
+public final class PdfPreview implements AutoCloseable {
+
+    /** 短于这个长度的片段不足以定位一句话，宁可不高亮也不乱标。 */
+    private static final int MIN_PARTIAL = 8;
+
+    private final PDDocument document;
+    private final PDFRenderer renderer;
+    private final List<PageInfo> pages;
+    private List<PageText> pageTexts;
+
+    private PdfPreview(PDDocument document) {
+        this.document = document;
+        this.renderer = new PDFRenderer(document);
+        this.pages = new ArrayList<>(document.getNumberOfPages());
+        for (int i = 0; i < document.getNumberOfPages(); i++) {
+            PDPage page = document.getPage(i);
+            PDRectangle box = page.getCropBox();
+            int rotation = ((page.getRotation() % 360) + 360) % 360;
+            boolean landscape = rotation == 90 || rotation == 270;
+            float width = landscape ? box.getHeight() : box.getWidth();
+            float height = landscape ? box.getWidth() : box.getHeight();
+            pages.add(new PageInfo(i + 1, width, height));
+        }
+    }
+
+    public static PdfPreview open(byte[] bytes) {
+        try {
+            return new PdfPreview(Loader.loadPDF(bytes));
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("无法读取 PDF：" + ex.getMessage(), ex);
+        }
+    }
+
+    public List<PageInfo> pages() {
+        return List.copyOf(pages);
+    }
+
+    public int pageCount() {
+        return pages.size();
+    }
+
+    /** @param pageNumber 1 起；scale=2 表示 2 倍分辨率（约 144 DPI） */
+    public byte[] renderPage(int pageNumber, float scale) {
+        if (pageNumber < 1 || pageNumber > pages.size()) {
+            throw new IllegalArgumentException("页码超出范围：" + pageNumber);
+        }
+        try {
+            BufferedImage image = renderer.renderImage(pageNumber - 1, scale, ImageType.RGB);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            ImageIO.write(image, "png", out);
+            return out.toByteArray();
+        } catch (IOException ex) {
+            throw new IllegalStateException("渲染 PDF 页面失败", ex);
+        }
+    }
+
+    /** 每页一段"去空白、全角归一"的正文 + 每个字符的页面矩形。 */
+    public List<PageText> pageTexts() {
+        if (pageTexts == null) {
+            pageTexts = extract();
+        }
+        return pageTexts;
+    }
+
+    /**
+     * 在原文里定位一句话。
+     *
+     * <p>模型引用的 quote 常与 PDF 抽出的文字差几个空格或标点，所以按"全角归一 +
+     * 去空白"后的字符串匹配；整句找不到时退化为最长前缀（至少 {@link #MIN_PARTIAL}
+     * 个字），再退化为去掉前导符号。都失败返回空，由前端把批注卡按顺序排下去。</p>
+     */
+    public Optional<Highlight> locate(String quote) {
+        String needle = normalize(quote).text();
+        if (needle.isEmpty()) {
+            return Optional.empty();
+        }
+        List<PageText> texts = pageTexts();
+
+        for (PageText page : texts) {
+            int index = page.text().indexOf(needle);
+            if (index >= 0) {
+                return Optional.of(highlight(page, index, needle.length()));
+            }
+        }
+
+        int prefix = longestPrefix(texts, needle);
+        if (prefix >= MIN_PARTIAL) {
+            String part = needle.substring(0, prefix);
+            for (PageText page : texts) {
+                int index = page.text().indexOf(part);
+                if (index >= 0) {
+                    return Optional.of(highlight(page, index, prefix));
+                }
+            }
+        }
+
+        // 模型偶尔会在引用前带一个序号或符号（"1. "、"• "），整体右移再试
+        for (int skip = 1; skip <= Math.min(6, needle.length() - MIN_PARTIAL); skip++) {
+            String part = needle.substring(skip);
+            for (PageText page : texts) {
+                int index = page.text().indexOf(part);
+                if (index >= 0) {
+                    return Optional.of(highlight(page, index, part.length()));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public void close() {
+        try {
+            document.close();
+        } catch (IOException ignored) {
+            // 只读预览，关闭失败没有补救动作
+        }
+    }
+
+    private List<PageText> extract() {
+        Collector collector = new Collector();
+        try {
+            collector.getText(document);
+        } catch (IOException ex) {
+            throw new IllegalStateException("提取 PDF 文本失败", ex);
+        }
+
+        List<PageText> result = new ArrayList<>(pages.size());
+        for (PageInfo info : pages) {
+            StringBuilder raw = new StringBuilder();
+            List<Rect> rawRects = new ArrayList<>();
+            for (TextPosition position : collector.positionsOf(info.index())) {
+                String unicode = position.getUnicode();
+                if (unicode == null || unicode.isEmpty()) {
+                    continue;
+                }
+                float height = Math.abs(safe(position.getHeightDir()));
+                float width = Math.max(0.1f, Math.abs(position.getWidthDirAdj()));
+                // getYDirAdj() 是基线到页面顶部的距离；只取字高会让 CJK 高亮条偏窄，
+                // 按字号撑满一行（上缘约 0.92em、下缘约 0.2em）。
+                float font = position.getFontSizeInPt();
+                float band = font > 1f ? font : height * 2f;
+                float top = position.getYDirAdj() - band * 0.92f;
+                Rect rect = new Rect(position.getXDirAdj(), top, width, band * 1.12f);
+                for (int i = 0; i < unicode.length(); i++) {
+                    raw.append(unicode.charAt(i));
+                    rawRects.add(rect);
+                }
+            }
+            Normalized normalized = normalize(raw);
+            List<Rect> charRects = new ArrayList<>(normalized.text().length());
+            for (int index : normalized.indexes()) {
+                charRects.add(rawRects.get(index));
+            }
+            result.add(new PageText(info.index(), info.width(), info.height(), normalized.text(), charRects));
+        }
+        return result;
+    }
+
+    private static Highlight highlight(PageText page, int start, int length) {
+        List<Rect> matched = new ArrayList<>(length);
+        int end = Math.min(page.charRects().size(), start + length);
+        for (int i = start; i < end; i++) {
+            matched.add(page.charRects().get(i));
+        }
+        return new Highlight(page.index(), merge(matched));
+    }
+
+    /** 同一行、间距不大的字符合并成一条高亮，避免每个字一个小方块。 */
+    private static List<Rect> merge(List<Rect> rects) {
+        List<Rect> merged = new ArrayList<>();
+        Rect current = null;
+        for (Rect rect : rects) {
+            if (current == null) {
+                current = rect;
+            } else if (sameLine(current, rect)) {
+                current = current.union(rect);
+            } else {
+                merged.add(current);
+                current = rect;
+            }
+        }
+        if (current != null) {
+            merged.add(current);
+        }
+        return merged;
+    }
+
+    private static boolean sameLine(Rect a, Rect b) {
+        float height = Math.max(a.height(), b.height());
+        if (height <= 0f) {
+            return false;
+        }
+        float centerA = a.y() + a.height() / 2f;
+        float centerB = b.y() + b.height() / 2f;
+        if (Math.abs(centerA - centerB) > height * 0.65f) {
+            return false;
+        }
+        float gap = b.x() - (a.x() + a.width());
+        return gap <= Math.max(3f, height * 2f);
+    }
+
+    private static int longestPrefix(List<PageText> texts, String needle) {
+        if (needle.length() < MIN_PARTIAL) {
+            return 0;
+        }
+        int low = MIN_PARTIAL - 1;
+        int high = needle.length();
+        while (low < high) {
+            int middle = (low + high + 1) >>> 1;
+            if (containsPrefix(texts, needle, middle)) {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return low >= MIN_PARTIAL ? low : 0;
+    }
+
+    private static boolean containsPrefix(List<PageText> texts, String needle, int length) {
+        String part = needle.substring(0, length);
+        for (PageText page : texts) {
+            if (page.text().contains(part)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static float safe(float value) {
+        return Float.isFinite(value) && value > 0.5f ? value : 1f;
+    }
+
+    private static Normalized normalize(CharSequence raw) {
+        if (raw == null) {
+            return new Normalized("", new int[0]);
+        }
+        StringBuilder text = new StringBuilder(raw.length());
+        List<Integer> indexes = new ArrayList<>(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char value = raw.charAt(i);
+            if (isBlank(value)) {
+                continue;
+            }
+            text.append(fold(value));
+            indexes.add(i);
+        }
+        int[] mapped = new int[indexes.size()];
+        for (int i = 0; i < mapped.length; i++) {
+            mapped[i] = indexes.get(i);
+        }
+        return new Normalized(text.toString(), mapped);
+    }
+
+    private static boolean isBlank(char value) {
+        return value <= ' '
+                || Character.isWhitespace(value)
+                || value == '\u00A0'
+                || value == '\u200B'
+                || value == '\u3000';
+    }
+
+    /** 全半角与常见标点归一：匹配时只关心字形，不关心排版用的标点变体。 */
+    private static char fold(char value) {
+        if (value >= '\uFF01' && value <= '\uFF5E') {
+            return (char) (value - 0xFEE0);
+        }
+        return switch (value) {
+            case '\u3002' -> '.';
+            case '\u3001' -> ',';
+            case '\u2018', '\u2019' -> '\'';
+            case '\u201C', '\u201D' -> '"';
+            case '\u2013', '\u2014' -> '-';
+            default -> Character.toLowerCase(value);
+        };
+    }
+
+    private record Normalized(String text, int[] indexes) {
+    }
+
+    public record PageInfo(int index, float width, float height) {
+    }
+
+    public record PageText(int index, float width, float height, String text, List<Rect> charRects) {
+    }
+
+    public record Highlight(int page, List<Rect> rects) {
+    }
+
+    public record Rect(float x, float y, float width, float height) {
+
+        public Rect union(Rect other) {
+            float left = Math.min(x, other.x);
+            float top = Math.min(y, other.y);
+            float right = Math.max(x + width, other.x + other.width);
+            float bottom = Math.max(y + height, other.y + other.height);
+            return new Rect(left, top, right - left, bottom - top);
+        }
+    }
+
+    /** 按"行"收集文字位置：PDFTextStripper 每次回调就是一行的一段。 */
+    private static final class Collector extends PDFTextStripper {
+
+        private final Map<Integer, List<TextPosition>> byPage = new LinkedHashMap<>();
+
+        Collector() {
+            super();
+        }
+
+        @Override
+        protected void startPage(PDPage page) throws IOException {
+            byPage.computeIfAbsent(getCurrentPageNo(), key -> new ArrayList<>());
+            super.startPage(page);
+        }
+
+        @Override
+        protected void writeString(String text, List<TextPosition> textPositions) {
+            if (textPositions == null || textPositions.isEmpty()) {
+                return;
+            }
+            byPage.computeIfAbsent(getCurrentPageNo(), key -> new ArrayList<>()).addAll(textPositions);
+        }
+
+        List<TextPosition> positionsOf(int pageNumber) {
+            return byPage.getOrDefault(pageNumber, List.of());
+        }
+    }
+}

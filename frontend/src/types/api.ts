@@ -72,6 +72,37 @@ export interface AnalysisView {
   createdAt: string
 }
 
+/** 原版预览：PDF 按页渲染，坐标系为 PDF 点、原点在页面左上。 */
+export interface PreviewPage {
+  index: number
+  width: number
+  height: number
+}
+
+export interface PreviewView {
+  available: boolean
+  reason: string | null
+  pages: PreviewPage[]
+}
+
+export interface HighlightRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface HighlightView {
+  page: number
+  rects: HighlightRect[]
+}
+
+export interface QuoteRequest {
+  pointId: string
+  quote: string
+  fallback: string | null
+}
+
 export interface InterviewSessionView {
   id: number
   resumeId: number

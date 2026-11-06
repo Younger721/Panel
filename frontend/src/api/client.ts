@@ -90,4 +90,25 @@ const apiClient = {
   }
 }
 
+/** 二进制接口（页面渲染图）：同样带登录态，返回 Blob 由调用方转 object URL。 */
+export async function requestBlob(url: string): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(`/api${url}`, { headers: buildAuthenticatedHeaders() })
+  } catch {
+    throw new ApiError('网络异常，请确认后端已启动', 'NETWORK')
+  }
+  if (response.status === 401) {
+    clearToken()
+    if (!location.pathname.startsWith('/login')) {
+      location.replace('/login')
+    }
+    throw new ApiError('登录已过期，请重新登录', 'UNAUTHORIZED')
+  }
+  if (!response.ok) {
+    throw new ApiError(`原版预览加载失败（HTTP ${response.status}）`, `HTTP_${response.status}`)
+  }
+  return response.blob()
+}
+
 export default apiClient

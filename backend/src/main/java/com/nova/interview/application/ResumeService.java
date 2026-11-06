@@ -30,6 +30,8 @@ import java.util.UUID;
 public class ResumeService {
 
     private static final long MAX_BYTES = 10L * 1024 * 1024;
+    /** 编辑器回写的正文上限，比原文件宽松：纯文本 20 万字符已远超正常简历 */
+    private static final int MAX_TEXT_CHARS = 200_000;
 
     private final ResumeRepository resumes;
     private final ResumeProfileRepository profiles;
@@ -107,6 +109,63 @@ public class ResumeService {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
         return resumes.findById(id).orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
+    }
+
+    /**
+     * 编辑器保存：把改好的正文写回成新的原文，并立即排队重新解析。
+     *
+     * <p>存成 text/plain 而不是改 DOCX：编辑器产出的就是纯文本，
+     * 假装回写二进制格式只会让解析器多做一次无意义的转换。</p>
+     *
+     * @param text 编辑器里的正文（纯文本，换行即分段）
+     */
+    @Transactional
+    public ResumeView saveContent(Long id, String text) {
+        Resume resume = require(id);
+        if (inFlight(resume)) {
+            throw new BusinessException(ErrorCode.CONFLICT);
+        }
+        String content = text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n').trim();
+        if (content.isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        if (content.length() > MAX_TEXT_CHARS) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        String objectKey = "resume/" + resume.getId() + "/edited-" + Instant.now().toEpochMilli() + ".txt";
+        store.put(objectKey, bytes, "text/plain");
+        resume.replaceSource(textName(resume.getFileName()), "text/plain", objectKey, sha256(bytes));
+        resumes.save(resume);
+        jobs.enqueue(ResumeParseWorker.JOB_TYPE + ":" + resume.getId(), null);
+        return view(resume);
+    }
+
+    /** 原文不变，重跑解析 + 批注（模型升级或结果不满意时用）。 */
+    @Transactional
+    public ResumeView reanalyze(Long id) {
+        Resume resume = require(id);
+        if (inFlight(resume)) {
+            throw new BusinessException(ErrorCode.CONFLICT);
+        }
+        resume.resetForReparse();
+        resumes.save(resume);
+        jobs.enqueue(ResumeParseWorker.JOB_TYPE + ":" + resume.getId(), null);
+        return view(resume);
+    }
+
+    /** 解析/分析进行中时再投一次任务没有意义，还会重复烧模型 token。 */
+    private static boolean inFlight(Resume resume) {
+        return resume.getStatus() == ResumeStatus.PARSING || resume.getStatus() == ResumeStatus.ANALYZING;
+    }
+
+    private static String textName(String fileName) {
+        String base = fileName == null || fileName.isBlank() ? "resume" : fileName;
+        int dot = base.lastIndexOf('.');
+        if (dot > 0) {
+            base = base.substring(0, dot);
+        }
+        return sanitize(base + ".txt");
     }
 
     private ResumeView view(Resume resume) {
