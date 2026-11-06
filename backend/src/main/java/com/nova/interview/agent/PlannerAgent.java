@@ -1,66 +1,110 @@
 package com.nova.interview.agent;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.nova.ai.application.ChatModelGateway;
-import com.nova.ai.domain.ContextSegment;
 import com.nova.interview.agent.model.InterviewPlan;
-import com.nova.interview.application.ParsedResume;
+import com.nova.interview.application.ResumeAnalysisService.AnalysisView;
+import com.nova.interview.application.ResumeAnalysisService.ModuleView;
+import com.nova.interview.application.ResumeAnalysisService.PointView;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Planner：把简历能力映射成一场面试的考察点矩阵。
+ * Planner：从简历批注里挑出本场面试要问的点。
  *
- * <p>输出被下游强约束：题目只能来自这里的点，所以"考什么"在面试开始前就确定，
- * 而不是每轮让模型自由发挥（那样必然重复、且无法解释为什么考这个）。</p>
+ * <p>这里<b>不调模型</b>：选题是确定性的，规则是"先问写弱的、同一模块最多两点、
+ * 模块间轮转"，因此同一份简历两次面试的考点一致，也保证了覆盖率。
+ * 真正需要模型的是出题和追问（{@link InterviewerAgent}）。</p>
  */
 @Component
 public class PlannerAgent {
 
-    private static final String INSTRUCTION = """
-            你是面试考察点规划器。根据候选人的结构化简历，设计本次面试的考察点矩阵。
+    /** 同一模块最多出几道主题，避免一场面试全在问同一个项目。 */
+    private static final int MAX_PER_MODULE = 2;
 
-            要求：
-            1. 考察点数量必须恰好等于 {turnBudget} 个。
-            2. 技能必须来自简历中真实出现的技术栈，禁止虚构。
-            3. 难度分布：BASIC 约 30%，ADVANCED 约 50%，EXPERT 约 20%。
-            4. 每个点只需一个技能维度，不要一个点覆盖三个技能。
-            5. id 用 P1、P2 依次编号，不能重复。
-            6. expectedSignals 写 2-3 条"答到什么程度算合格"，用于后续评分对齐。
+    public InterviewPlan plan(AnalysisView analysis, int questionCount) {
+        List<Candidate> all = new ArrayList<>();
+        int seq = 0;
+        for (ModuleView module : analysis.modules()) {
+            for (PointView point : module.points()) {
+                all.add(new Candidate(++seq, module.type(), module.title(), point));
+            }
+        }
+        if (all.isEmpty()) {
+            throw new IllegalStateException("resume has no annotation point to interview on");
+        }
 
-            只输出 JSON，不要 Markdown，不要解释：
-            {"strategy":"一句话说明本次面试的整体策略",
-             "points":[{"id":"P1","skill":"Kafka","difficulty":"ADVANCED","weight":2,
-                        "expectedSignals":["提到分区与顺序性","能说出至少一种幂等方案"]}]}
-            """;
+        // 弱点优先：写得不充分的地方才值得追问
+        List<Candidate> ordered = all.stream()
+                .sorted(Comparator.comparingInt((Candidate c) -> priority(c.point().level()))
+                        .thenComparingInt(Candidate::seq))
+                .toList();
 
-    private final ChatModelGateway gateway;
-    private final ObjectMapper objectMapper;
+        List<Candidate> chosen = new ArrayList<>();
+        Map<String, Integer> perModule = new HashMap<>();
+        for (Candidate candidate : ordered) {
+            if (chosen.size() >= questionCount) {
+                break;
+            }
+            int used = perModule.getOrDefault(candidate.moduleType(), 0);
+            if (used >= MAX_PER_MODULE) {
+                continue;
+            }
+            chosen.add(candidate);
+            perModule.put(candidate.moduleType(), used + 1);
+        }
+        // 模块太集中导致选不满时，放开模块配额
+        if (chosen.size() < questionCount) {
+            for (Candidate candidate : ordered) {
+                if (chosen.size() >= questionCount) {
+                    break;
+                }
+                if (!chosen.contains(candidate)) {
+                    chosen.add(candidate);
+                }
+            }
+        }
+        chosen.sort(Comparator.comparingInt(Candidate::seq));
 
-    public PlannerAgent(ChatModelGateway gateway, ObjectMapper objectMapper) {
-        this.gateway = gateway;
-        this.objectMapper = objectMapper;
+        List<InterviewPlan.Point> points = new ArrayList<>();
+        int index = 0;
+        for (Candidate candidate : chosen) {
+            PointView point = candidate.point();
+            points.add(new InterviewPlan.Point("P" + (++index), point.title(),
+                    difficultyOf(point.level()), 1, List.of(truncate(point.comment(), 120)),
+                    point.quote(), point.comment(), point.level()));
+        }
+        String strategy = "优先考察简历中表述薄弱的点：" + points.stream()
+                .map(InterviewPlan.Point::skill).limit(3).reduce((a, b) -> a + "、" + b).orElse("");
+        return new InterviewPlan(strategy, points);
     }
 
-    public InterviewPlan plan(ParsedResume resume, int turnBudget) {
-        String prompt = INSTRUCTION.replace("{turnBudget}", String.valueOf(turnBudget));
-        String context = writeResume(resume);
-        String raw = gateway.completeStructuredJson(prompt,
-                List.of(new ContextSegment("resume", "resume", context))).content();
-        InterviewPlan plan = AgentJson.parse(objectMapper, raw, InterviewPlan.class, "Planner");
-        if (plan.points().size() != turnBudget) {
-            throw new IllegalStateException("Planner returned " + plan.points().size()
-                    + " points, expected " + turnBudget);
-        }
-        return plan;
+    private static int priority(String level) {
+        return switch (level == null ? "" : level) {
+            case "WEAK" -> 0;
+            case "MEDIUM" -> 1;
+            default -> 2;
+        };
     }
 
-    private String writeResume(ParsedResume resume) {
-        try {
-            return objectMapper.writeValueAsString(resume);
-        } catch (Exception ex) {
-            throw new IllegalStateException("cannot serialize resume", ex);
+    private static String difficultyOf(String level) {
+        return switch (level == null ? "" : level) {
+            case "WEAK" -> "BASIC";
+            case "STRONG" -> "EXPERT";
+            default -> "ADVANCED";
+        };
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null) {
+            return "";
         }
+        return value.length() <= max ? value : value.substring(0, max) + "…";
+    }
+
+    private record Candidate(int seq, String moduleType, String moduleTitle, PointView point) {
     }
 }

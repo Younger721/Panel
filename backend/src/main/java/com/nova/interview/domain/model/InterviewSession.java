@@ -32,6 +32,14 @@ public class InterviewSession {
     @Column(nullable = false)
     private int turnBudget;
 
+    /** 主问题数量（用户设置页的 N）。 */
+    @Column(nullable = false)
+    private int questionCount;
+
+    /** 每个主问题最多追问几次（用户设置页的 M），0 表示不追问。 */
+    @Column(nullable = false)
+    private int followUpLimit;
+
     /** 已出的题数（含当前未作答的那道）。 */
     @Column(nullable = false)
     private int currentTurn;
@@ -51,10 +59,13 @@ public class InterviewSession {
     protected InterviewSession() {
     }
 
-    public static InterviewSession create(Long resumeId, int turnBudget, String planJson) {
+    public static InterviewSession create(Long resumeId, int questionCount, int followUpLimit, String planJson) {
         InterviewSession session = new InterviewSession();
         session.resumeId = resumeId;
-        session.turnBudget = turnBudget;
+        session.questionCount = questionCount;
+        session.followUpLimit = followUpLimit;
+        // 上限 = N 个主问题，每个最多追问 M 次；实际轮次通常更少
+        session.turnBudget = questionCount * (1 + followUpLimit);
         session.planJson = planJson;
         session.status = InterviewStatus.PLANNED;
         return session;
@@ -100,6 +111,14 @@ public class InterviewSession {
 
     public int getTurnBudget() {
         return turnBudget;
+    }
+
+    public int getQuestionCount() {
+        return questionCount;
+    }
+
+    public int getFollowUpLimit() {
+        return followUpLimit;
     }
 
     public int getCurrentTurn() {

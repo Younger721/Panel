@@ -47,6 +47,17 @@ public class InterviewTurn {
     @Column(length = 1000)
     private String followUps;
 
+    /** MAIN 主问题 / FOLLOW_UP 追问。 */
+    @Column(nullable = false, length = 16)
+    private String kind = "MAIN";
+
+    /** 追问挂在哪个主问题的 seq 上；主问题为 null。 */
+    private Integer parentSeq;
+
+    /** 追问层级：0=主问题，1..M=第几层追问。 */
+    @Column(nullable = false)
+    private int depth;
+
     @Lob
     @Column(columnDefinition = "LONGTEXT")
     private String answer;
@@ -76,7 +87,8 @@ public class InterviewTurn {
     }
 
     public static InterviewTurn ask(Long sessionId, int seq, String pointId, String skill, String difficulty,
-                                    String question, String intent, String followUps) {
+                                    String question, String intent, String followUps,
+                                    String kind, Integer parentSeq, int depth) {
         InterviewTurn turn = new InterviewTurn();
         turn.sessionId = sessionId;
         turn.seq = seq;
@@ -86,6 +98,9 @@ public class InterviewTurn {
         turn.question = question;
         turn.intent = intent;
         turn.followUps = followUps;
+        turn.kind = kind == null ? "MAIN" : kind;
+        turn.parentSeq = parentSeq;
+        turn.depth = depth;
         return turn;
     }
 
@@ -135,6 +150,18 @@ public class InterviewTurn {
 
     public String getFollowUps() {
         return followUps;
+    }
+
+    public String getKind() {
+        return kind;
+    }
+
+    public Integer getParentSeq() {
+        return parentSeq;
+    }
+
+    public int getDepth() {
+        return depth;
     }
 
     public String getAnswer() {

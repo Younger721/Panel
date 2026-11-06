@@ -46,7 +46,15 @@ public class InterviewController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<SessionView> create(@Valid @RequestBody CreateSessionRequest request) {
         require("interview:start");
-        return ApiResponse.success(service.create(request.resumeId(), request.turnBudget()));
+        return ApiResponse.success(service.create(request.resumeId(), request.questionCount(),
+                request.followUpLimit()));
+    }
+
+    /** 历史面试记录。 */
+    @GetMapping
+    public ApiResponse<java.util.List<com.nova.interview.application.InterviewService.SessionSummary>> list() {
+        require("interview:read");
+        return ApiResponse.success(service.list());
     }
 
     @GetMapping("/{id}")
@@ -77,7 +85,8 @@ public class InterviewController {
     public ResponseEntity<SseEmitter> createStream(@Valid @RequestBody CreateSessionRequest request) {
         require("interview:start");
         return stream(emitter -> {
-            SessionView view = service.create(request.resumeId(), request.turnBudget(), sender(emitter));
+            SessionView view = service.create(request.resumeId(), request.questionCount(),
+                    request.followUpLimit(), sender(emitter));
             send(emitter, "done", view);
         });
     }
@@ -143,7 +152,7 @@ public class InterviewController {
         }
     }
 
-    public record CreateSessionRequest(@NotNull Long resumeId, Integer turnBudget) {
+    public record CreateSessionRequest(@NotNull Long resumeId, Integer questionCount, Integer followUpLimit) {
     }
 
     public record SubmitAnswerRequest(String answer) {

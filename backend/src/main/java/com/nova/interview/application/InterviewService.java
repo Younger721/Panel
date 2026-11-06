@@ -17,47 +17,43 @@ import com.nova.interview.domain.model.InterviewStatus;
 import com.nova.interview.domain.model.InterviewTurn;
 import com.nova.interview.domain.repository.InterviewSessionRepository;
 import com.nova.interview.domain.repository.InterviewTurnRepository;
-import com.nova.interview.domain.repository.ResumeProfileRepository;
-import com.nova.interview.domain.repository.ResumeRepository;
 import com.nova.shared.error.BusinessException;
 import com.nova.shared.error.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 面试编排：唯一知道"下一步该谁动"的地方。
  *
- * <p>流程（每个 Agent 只做一件事，状态全部落库）：</p>
  * <pre>
- * create  → Planner(考察点矩阵) → Interviewer(第1题)        → IN_PROGRESS
- * answer  → Evaluator(带证据打分) → [Reviewer 仅在有矛盾时]  → 下一题 / 报告
+ * create  → Planner(从批注里选题) → Interviewer(第 1 题)
+ * answer  → Evaluator(评分+证据) → [Reviewer 仅矛盾时]
+ *         → 答得浅且未达追问上限 ? 同点追问 : 下一个点 / 报告
  * </pre>
  *
- * <p>两条硬规则写在代码里而不是提示词里：</p>
- * <ol>
- *   <li>题目必须落在未覆盖的考察点上（{@link InterviewerAgent} 校验）；</li>
- *   <li>总分由逐题分数重算，不采信模型自报的总分。</li>
- * </ol>
+ * <p>轮次可预期：主问题数 N、每个主问题最多追问 M 次，上限 N×(1+M)。
+ * 追问是动态的——答得好就不追问，所以实际轮次通常小于上限。</p>
  */
 @Service
 public class InterviewService {
 
     private static final Logger log = LoggerFactory.getLogger(InterviewService.class);
 
-    private static final int MIN_TURNS = 3;
-    private static final int MAX_TURNS = 10;
+    private static final int MIN_QUESTIONS = 1;
+    private static final int MAX_QUESTIONS = 15;
+    private static final int MAX_FOLLOW_UP = 3;
 
     private final InterviewSessionRepository sessions;
     private final InterviewTurnRepository turns;
-    private final ResumeRepository resumes;
-    private final ResumeProfileRepository profiles;
+    private final ResumeAnalysisService analysisService;
     private final PlannerAgent planner;
     private final InterviewerAgent interviewer;
     private final EvaluatorAgent evaluator;
@@ -65,45 +61,54 @@ public class InterviewService {
     private final ReportAgent reporter;
     private final ObjectMapper objectMapper;
 
+    /** 低于这个分数才追问；答得好直接进入下一个点。 */
+    private final int followUpThreshold;
+
     public InterviewService(InterviewSessionRepository sessions,
                             InterviewTurnRepository turns,
-                            ResumeRepository resumes,
-                            ResumeProfileRepository profiles,
+                            ResumeAnalysisService analysisService,
                             PlannerAgent planner,
                             InterviewerAgent interviewer,
                             EvaluatorAgent evaluator,
                             ReviewerAgent reviewer,
                             ReportAgent reporter,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            @Value("${nova.interview.follow-up-threshold:70}") int followUpThreshold) {
         this.sessions = sessions;
         this.turns = turns;
-        this.resumes = resumes;
-        this.profiles = profiles;
+        this.analysisService = analysisService;
         this.planner = planner;
         this.interviewer = interviewer;
         this.evaluator = evaluator;
         this.reviewer = reviewer;
         this.reporter = reporter;
         this.objectMapper = objectMapper;
+        this.followUpThreshold = followUpThreshold;
     }
 
     @Transactional
-    public SessionView create(Long resumeId, Integer requestedTurns) {
-        return create(resumeId, requestedTurns, InterviewProgressListener.NOOP);
+    public SessionView create(Long resumeId, Integer requestedQuestions, Integer requestedFollowUps) {
+        return create(resumeId, requestedQuestions, requestedFollowUps, InterviewProgressListener.NOOP);
     }
 
     @Transactional
-    public SessionView create(Long resumeId, Integer requestedTurns, InterviewProgressListener listener) {
-        int budget = clampTurns(requestedTurns);
-        ParsedResume resume = loadResume(resumeId);
+    public SessionView create(Long resumeId, Integer requestedQuestions, Integer requestedFollowUps,
+                              InterviewProgressListener listener) {
+        if (resumeId == null || resumeId <= 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        int questionCount = clampQuestions(requestedQuestions);
+        int followUpLimit = clampFollowUps(requestedFollowUps);
 
         long planStart = System.currentTimeMillis();
-        listener.onEvent("agent", AgentEvent.started("Planner", "生成考察点矩阵"));
-        InterviewPlan plan = planner.plan(resume, budget);
-        listener.onEvent("agent", AgentEvent.finished("Planner", "考察点矩阵",
+        listener.onEvent("agent", AgentEvent.started("Planner", "从简历批注里选题"));
+        ResumeAnalysisService.AnalysisView analysis = analysisService.view(resumeId);
+        InterviewPlan plan = planner.plan(analysis, questionCount);
+        listener.onEvent("agent", AgentEvent.finished("Planner", "选题",
                 plan.points().size() + " 个考察点", plan.points().size(), planStart));
 
-        InterviewSession session = sessions.save(InterviewSession.create(resumeId, budget, write(plan)));
+        InterviewSession session = sessions.save(
+                InterviewSession.create(resumeId, plan.points().size(), followUpLimit, write(plan)));
         listener.onEvent("session", detail(session.getId()));
 
         long askStart = System.currentTimeMillis();
@@ -111,14 +116,15 @@ public class InterviewService {
         QuestionDraft first = interviewer.next(plan, List.of());
         listener.onEvent("agent", AgentEvent.finished("Interviewer", "出题", "第 1 题", 1, askStart));
 
+        InterviewPlan.Point point = plan.point(first.pointId());
         InterviewTurn turn = turns.save(InterviewTurn.ask(session.getId(), 1, first.pointId(),
-                plan.point(first.pointId()).skill(), first.difficulty(), first.question(), first.intent(),
-                write(first.followUps())));
+                point == null ? "简历" : point.skill(), first.difficulty(), first.question(), first.intent(),
+                write(first.followUps()), "MAIN", null, 0));
         session.markInProgress(1);
         sessions.save(session);
         listener.onEvent("question", toQuestion(turn));
-        log.info("Interview created: id={}, resumeId={}, turns={}, firstPoint={}",
-                session.getId(), resumeId, budget, first.pointId());
+        log.info("Interview created: id={}, resumeId={}, questions={}, followUpLimit={}",
+                session.getId(), resumeId, plan.points().size(), followUpLimit);
         return detail(session.getId());
     }
 
@@ -161,31 +167,76 @@ public class InterviewService {
         turns.save(turn);
         listener.onEvent("evaluation", toView(turn));
 
-        if (turn.getSeq() >= session.getTurnBudget()) {
-            long reportStart = System.currentTimeMillis();
-            listener.onEvent("agent", AgentEvent.started("Report", "生成本场报告"));
-            String reportJson = finish(session, turns.findBySessionId(sessionId));
-            listener.onEvent("agent", AgentEvent.finished("Report", "报告", "已生成", 1, reportStart));
-            listener.onEvent("report", read(reportJson));
-            return new AnswerResult(toView(turn), null, session.getStatus(), session.getOverallScore(),
-                    read(reportJson));
-        }
-
+        List<InterviewTurn> all = turns.findBySessionId(sessionId);
         InterviewPlan plan = readPlan(session.getPlanJson());
-        List<InterviewTurn> answered = turns.findBySessionId(sessionId);
-        long askStart = System.currentTimeMillis();
-        listener.onEvent("agent", AgentEvent.started("Interviewer", "出下一题"));
-        QuestionDraft next = interviewer.next(plan, answered);
-        listener.onEvent("agent", AgentEvent.finished("Interviewer", "出题",
-                "第 " + (turn.getSeq() + 1) + " 题", 1, askStart));
-        InterviewTurn nextTurn = turns.save(InterviewTurn.ask(sessionId, turn.getSeq() + 1, next.pointId(),
-                plan.point(next.pointId()).skill(), next.difficulty(), next.question(), next.intent(),
-                write(next.followUps())));
-        session.markInProgress(nextTurn.getSeq());
+        int answeredMains = (int) all.stream()
+                .filter(t -> "MAIN".equals(t.getKind()) && t.getAnswer() != null)
+                .count();
+
+        boolean mayFollowUp = finalScore < followUpThreshold
+                && turn.getDepth() < session.getFollowUpLimit();
+        if (mayFollowUp) {
+            return askFollowUp(session, plan, turn, all, listener);
+        }
+        if (answeredMains >= session.getQuestionCount()) {
+            return finishSession(session, all, turn, listener);
+        }
+        return askNextMain(session, plan, turn, all, listener);
+    }
+
+    private AnswerResult askFollowUp(InterviewSession session, InterviewPlan plan, InterviewTurn last,
+                                     List<InterviewTurn> all, InterviewProgressListener listener) {
+        int rootSeq = "MAIN".equals(last.getKind()) ? last.getSeq()
+                : (last.getParentSeq() == null ? last.getSeq() : last.getParentSeq());
+        List<InterviewTurn> chain = all.stream()
+                .filter(t -> Objects.equals(t.getPointId(), last.getPointId()))
+                .toList();
+        long start = System.currentTimeMillis();
+        listener.onEvent("agent", AgentEvent.started("Interviewer", "就同一考察点追问"));
+        QuestionDraft draft = interviewer.followUp(plan.point(last.getPointId()), chain, last.getAnswer());
+        listener.onEvent("agent", AgentEvent.finished("Interviewer", "追问",
+                "第 " + (last.getSeq() + 1) + " 题", 1, start));
+
+        InterviewTurn next = turns.save(InterviewTurn.ask(session.getId(), last.getSeq() + 1,
+                last.getPointId(), last.getSkill(), last.getDifficulty(), draft.question(), draft.intent(),
+                "[]", "FOLLOW_UP", rootSeq, last.getDepth() + 1));
+        session.markInProgress(next.getSeq());
         sessions.save(session);
-        listener.onEvent("question", toQuestion(nextTurn));
-        return new AnswerResult(toView(turn), toQuestion(nextTurn), session.getStatus(),
+        listener.onEvent("question", toQuestion(next));
+        log.info("Follow-up asked: session={}, seq={}, depth={}, point={}",
+                session.getId(), next.getSeq(), next.getDepth(), next.getPointId());
+        return new AnswerResult(toView(last), toQuestion(next), session.getStatus(),
                 session.getOverallScore(), null);
+    }
+
+    private AnswerResult askNextMain(InterviewSession session, InterviewPlan plan, InterviewTurn last,
+                                     List<InterviewTurn> all, InterviewProgressListener listener) {
+        long start = System.currentTimeMillis();
+        listener.onEvent("agent", AgentEvent.started("Interviewer", "出下一题"));
+        QuestionDraft draft = interviewer.next(plan, all);
+        listener.onEvent("agent", AgentEvent.finished("Interviewer", "出题",
+                "第 " + (last.getSeq() + 1) + " 题", 1, start));
+
+        InterviewPlan.Point point = plan.point(draft.pointId());
+        InterviewTurn next = turns.save(InterviewTurn.ask(session.getId(), last.getSeq() + 1, draft.pointId(),
+                point == null ? last.getSkill() : point.skill(), draft.difficulty(), draft.question(),
+                draft.intent(), write(draft.followUps()), "MAIN", null, 0));
+        session.markInProgress(next.getSeq());
+        sessions.save(session);
+        listener.onEvent("question", toQuestion(next));
+        return new AnswerResult(toView(last), toQuestion(next), session.getStatus(),
+                session.getOverallScore(), null);
+    }
+
+    private AnswerResult finishSession(InterviewSession session, List<InterviewTurn> all, InterviewTurn last,
+                                       InterviewProgressListener listener) {
+        long start = System.currentTimeMillis();
+        listener.onEvent("agent", AgentEvent.started("Report", "生成本场报告"));
+        String reportJson = finish(session, all);
+        listener.onEvent("agent", AgentEvent.finished("Report", "报告", "已生成", 1, start));
+        listener.onEvent("report", read(reportJson));
+        return new AnswerResult(toView(last), null, session.getStatus(), session.getOverallScore(),
+                read(reportJson));
     }
 
     public SessionView detail(Long sessionId) {
@@ -193,8 +244,17 @@ public class InterviewService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
         List<TurnView> views = turns.findBySessionId(sessionId).stream().map(this::toView).toList();
         return new SessionView(session.getId(), session.getResumeId(), session.getStatus(),
-                session.getTurnBudget(), session.getCurrentTurn(), session.getOverallScore(),
-                session.getCreatedAt(), views);
+                session.getTurnBudget(), session.getQuestionCount(), session.getFollowUpLimit(),
+                session.getCurrentTurn(), session.getOverallScore(), session.getCreatedAt(), views);
+    }
+
+    /** 历史记录：按创建时间倒序，带一句报告摘要便于列表展示。 */
+    public List<SessionSummary> list() {
+        return sessions.findAll().stream().map(session -> new SessionSummary(
+                session.getId(), session.getResumeId(), session.getStatus(),
+                session.getQuestionCount(), session.getFollowUpLimit(),
+                session.getOverallScore(), summaryOf(session.getReportJson()),
+                session.getCreatedAt())).toList();
     }
 
     public JsonNode report(Long sessionId) {
@@ -211,7 +271,7 @@ public class InterviewService {
         InterviewReportData data = reporter.report(answered);
         int overall = (int) Math.round(answered.stream()
                 .map(InterviewTurn::getFinalScore)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .mapToInt(Integer::intValue)
                 .average()
                 .orElse(0));
@@ -219,6 +279,18 @@ public class InterviewService {
         session.markCompleted(reportJson, overall);
         sessions.save(session);
         return reportJson;
+    }
+
+    private String summaryOf(String reportJson) {
+        JsonNode node = read(reportJson);
+        if (node == null) {
+            return null;
+        }
+        String summary = node.path("report").path("summary").asText("");
+        if (summary.isBlank()) {
+            return null;
+        }
+        return summary.length() <= 120 ? summary : summary.substring(0, 120) + "…";
     }
 
     /** 三种"评分可疑"的情况才复核，正常回答不额外烧一次模型调用。 */
@@ -258,34 +330,26 @@ public class InterviewService {
         return feedback;
     }
 
-    private ParsedResume loadResume(Long resumeId) {
-        if (resumeId == null || resumeId <= 0) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
-        }
-        resumes.findById(resumeId).orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
-        var profile = profiles.findByResumeId(resumeId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.CONFLICT));
-        try {
-            return objectMapper.readValue(profile.getPayloadJson(), ParsedResume.class);
-        } catch (Exception ex) {
-            throw new IllegalStateException("stored resume profile is not readable", ex);
-        }
+    private static int clampQuestions(Integer requested) {
+        int value = requested == null ? 5 : requested;
+        return Math.max(MIN_QUESTIONS, Math.min(MAX_QUESTIONS, value));
     }
 
-    private static int clampTurns(Integer requested) {
-        int turns = requested == null ? 5 : requested;
-        return Math.max(MIN_TURNS, Math.min(MAX_TURNS, turns));
+    private static int clampFollowUps(Integer requested) {
+        int value = requested == null ? 2 : requested;
+        return Math.max(0, Math.min(MAX_FOLLOW_UP, value));
     }
 
     private TurnView toView(InterviewTurn turn) {
-        return new TurnView(turn.getSeq(), turn.getQuestion(), turn.getSkill(), turn.getDifficulty(),
-                turn.getAnswer(), turn.getFinalScore(), turn.getFeedback(),
-                read(turn.getScoresJson()), read(turn.getReviewJson()), parseFollowUps(turn.getFollowUps()));
+        return new TurnView(turn.getSeq(), turn.getKind(), turn.getParentSeq(), turn.getDepth(),
+                turn.getQuestion(), turn.getSkill(), turn.getDifficulty(), turn.getAnswer(),
+                turn.getFinalScore(), turn.getFeedback(), read(turn.getScoresJson()),
+                read(turn.getReviewJson()), parseFollowUps(turn.getFollowUps()));
     }
 
     private QuestionView toQuestion(InterviewTurn turn) {
-        return new QuestionView(turn.getSeq(), turn.getQuestion(), turn.getSkill(), turn.getDifficulty(),
-                parseFollowUps(turn.getFollowUps()));
+        return new QuestionView(turn.getSeq(), turn.getKind(), turn.getParentSeq(), turn.getDepth(),
+                turn.getQuestion(), turn.getSkill(), turn.getDifficulty(), parseFollowUps(turn.getFollowUps()));
     }
 
     private List<String> parseFollowUps(String json) {
@@ -327,21 +391,26 @@ public class InterviewService {
         }
     }
 
-    /** 报告落库结构：模型写的正文 + 代码算的总分。 */
     public record ReportPayload(InterviewReportData report, int overallScore) {
     }
 
-    public record SessionView(Long id, Long resumeId, InterviewStatus status, int turnBudget, int currentTurn,
-                              Integer overallScore, java.time.Instant createdAt, List<TurnView> turns) {
+    public record SessionView(Long id, Long resumeId, InterviewStatus status, int turnBudget,
+                              int questionCount, int followUpLimit, int currentTurn, Integer overallScore,
+                              java.time.Instant createdAt, List<TurnView> turns) {
     }
 
-    public record TurnView(int seq, String question, String skill, String difficulty, String answer,
-                           Integer score, String feedback, JsonNode evaluation, JsonNode review,
-                           List<String> followUps) {
+    public record SessionSummary(Long id, Long resumeId, InterviewStatus status, int questionCount,
+                                 int followUpLimit, Integer overallScore, String summary,
+                                 java.time.Instant createdAt) {
     }
 
-    public record QuestionView(int seq, String question, String skill, String difficulty,
-                               List<String> followUps) {
+    public record TurnView(int seq, String kind, Integer parentSeq, int depth, String question, String skill,
+                           String difficulty, String answer, Integer score, String feedback,
+                           JsonNode evaluation, JsonNode review, List<String> followUps) {
+    }
+
+    public record QuestionView(int seq, String kind, Integer parentSeq, int depth, String question,
+                               String skill, String difficulty, List<String> followUps) {
     }
 
     public record AnswerResult(TurnView evaluatedTurn, QuestionView nextQuestion, InterviewStatus status,

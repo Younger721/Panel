@@ -5,17 +5,21 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 
 /**
- * Planner 产出的考察点矩阵：技能 × 难度 × 轮次。
+ * 考察点矩阵：面试要问的点，及其来源。
  *
- * <p>这是多 Agent 方案里<b>唯一约束"考什么"的地方</b>。Interviewer 只能从
- * 未覆盖的点里挑题，所以"连续两轮考同一个点"在结构上不可能发生，
- * 而不是靠提示词里写一句"请勿重复"。</p>
+ * <p>每个点都绑定简历分析里的某个小点（{@code quote} + {@code comment}），
+ * 所以"面试问的"和"批注里标的"是同一批点——用户看到的问题不会凭空出现。</p>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record InterviewPlan(String strategy, List<Point> points) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Point(String id, String skill, String difficulty, Integer weight, List<String> expectedSignals) {
+    public record Point(String id, String skill, String difficulty, Integer weight,
+                        List<String> expectedSignals, String quote, String comment, String level) {
+
+        public Point {
+            expectedSignals = expectedSignals == null ? List.of() : List.copyOf(expectedSignals);
+        }
     }
 
     public InterviewPlan {
