@@ -1,300 +1,363 @@
+<div align="center">
+
 # Panel
 
-RAG 简历分析 + 模拟面试项目的 **AI 内核 / 中间件底座**。
+**AI 模拟面试官 · 简历批注与复盘平台**
 
-本目录的代码来自 GymMind（AI 健身 RAG 系统）中可复用的部分，已统一改包名为 `com.panel`、配置前缀为 `panel.*`、品牌为 `Panel`。健身业务代码（会员、课程、预约、会籍、训练、器材、分析）全部剔除。
+上传一份简历，拿到逐条批注、真正能改的编辑器、一场数字人模拟面试，以及一份说得出问题的复盘报告。
 
-> 生成方式：`scripts/migrate-from-gymmind.ps1`（幂等，可重复执行以同步上游改动）
+![Java](https://img.shields.io/badge/Java-21-2b6ca3?logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.12-6db33f?logo=springboot&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8-4479a1?logo=mysql&logoColor=white)
+![Flyway](https://img.shields.io/badge/Flyway-migrations-cc0200)
+
+</div>
+
+<p align="center">
+  <img src="docs/screenshots/annotation-pdf.jpg" alt="简历批注：原版 PDF + 逐条批注" width="100%">
+</p>
 
 ---
 
-## 1. 当前状态
+## 目录
 
-| 项 | 结果 |
+- [它解决什么问题](#它解决什么问题)
+- [功能一览](#功能一览)
+- [界面截图](#界面截图)
+- [技术栈](#技术栈)
+- [架构](#架构)
+- [快速开始](#快速开始)
+- [目录结构](#目录结构)
+- [几个关键设计](#几个关键设计)
+- [测试与回归](#测试与回归)
+- [关于示例数据](#关于示例数据)
+
+---
+
+## 它解决什么问题
+
+求职者最缺的不是"简历模板"，而是**面试官视角的反馈**：哪一段写得太虚、哪个成果没有量化、真被追问时哪里答不上来。
+
+Panel 把这三件事串成一条链路：
+
+1. **看见问题** —— 简历被逐条批注，每条都引用原文，标注强 / 中 / 弱
+2. **真的改掉** —— 不是给一堆建议让你自己找，而是直接提供三种编辑器，改完能导出
+3. **被追问一遍** —— 对着改好的简历做一场模拟面试，被打分、被追问、被复盘
+
+> 一条完整的链路：`上传 → 解析 → 逐条批注 → 编辑排版或重写内容 → 模拟面试 → 复盘报告`
+
+## 功能一览
+
+### 简历与批注
+
+| 能力 | 说明 |
 |---|---|
-| Java 源文件 | 422 个（`backend/src/main/java/com/panel`） |
-| 编译（JDK 21） | ✅ `mvn -DskipTests compile` BUILD SUCCESS |
-| 单元测试 | ❌ 未迁移（GymMind 的 236 个测试依赖健身夹具，需按新域重写） |
-| 启动验证 | ⏳ 未验证（需 MySQL + Redis + ES + Milvus 就绪） |
-| 前端 | 仅 3 个可复用工具文件，非完整工程 |
+| 多格式解析 | PDF / DOCX / Markdown / TXT，按 Content-Type 分派到不同解析器 |
+| 异步流水线 | `PENDING → PARSING → ANALYZING → PARSED`，前端轮询，失败可重试 |
+| 逐条批注 | 按「模块 → 小点」组织，每点带等级（强/中/弱）、原文引用与字符级锚点 |
+| PDF 原版高亮 | 页面渲染图 + 批注矩形定位；扫描件等无文本层的文件自动退回文本视图 |
+| 只看弱项 | 一键过滤，先补最该补的那几条 |
+| 重新分析 | 原文不变，单独重跑解析与批注 |
 
----
+### 三种编辑方式
 
-## 2. 目录结构
+编辑不是二选一，而是**按文件形态自动选路**，也可以随时切换：
+
+| 方式 | 适用 | 特点 |
+|---|---|---|
+| **PDF 原位编辑** | 有文本层的 PDF | 点一块改一块，字体取自原件内嵌字体，可调版式、导出改后的 PDF |
+| **Markdown 内容稿** | 任意来源 | 自由书写，`#` 即章节；保存后解析以内容稿为准，**原版排版不受影响** |
+| **结构化编辑器** | DOCX / TXT / 扫描件 | 没有版面时的兜底，按段落改文字 |
+
+Markdown 内容稿与原件是**双源**关系：内容稿只影响「解析与批注看到的正文」，原件的版式、预览和 PDF 导出完全不动 —— 想改排版回原版视图，想改文字用 Markdown。
+
+### 模拟面试
+
+<p align="center">
+  <img src="docs/screenshots/interview-live.jpg" alt="数字人面试官" width="100%">
+</p>
+
+- **数字人面试官**：实时视频形象 + 语音播报，三种人设（严肃型技术面试官等）
+- **语音作答**：按住空格说话，实时转写（WS 流式 ASR），也可以直接打字
+- **多智能体编排**：
+  - `Planner` 从批注点里挑考点，可参考岗位 JD
+  - `Interviewer` 逐题提问
+  - `技术评委 / 表达评委` 并行打分，各自带证据
+  - `Reviewer` 只在分数与证据矛盾时介入复核
+  - `Reporter` 汇总成报告
+- **追问**：按人设阈值触发，追几层可配（0–3）
+- **状态机**：`IN_PROGRESS → COMPLETED / ABANDONED`，中途退出可以主动结束
+
+### 复盘报告
+
+<p align="center">
+  <img src="docs/screenshots/interview-report.jpg" alt="面试报告" width="100%">
+</p>
+
+总分环、能力分布（每条能力有得分与一句话点评）、「做得好」与「需要补的」两类清单、逐题评分与证据。
+
+### 知识库（同仓库的另一个模块）
+
+文档入库 → 双库 RAG（Elasticsearch 关键词 + Milvus 向量）→ 题库、知识点与刷题。侧边栏里的「我的资料 / 练习 / 问答」即此模块，与面试模块共用同一套账号、租户与权限。
+
+## 界面截图
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/resumes.jpg" alt="简历库"><br><sub><b>简历库</b>：状态、经验年限、技能数一目了然，删除只做软删可撤销</sub></td>
+    <td width="50%"><img src="docs/screenshots/upload.jpg" alt="上传简历"><br><sub><b>上传</b>：拖拽即传，本机先做大小与格式预检</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/pdf-editor.jpg" alt="PDF 原位编辑"><br><sub><b>PDF 原位编辑</b>：整块改字，字体与字号跟随原件</sub></td>
+    <td width="50%"><img src="docs/screenshots/markdown-editor.jpg" alt="Markdown 内容稿"><br><sub><b>Markdown 内容稿</b>：左写右看，`#` 即章节</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/annotation-text.jpg" alt="文本视图批注"><br><sub><b>文本视图</b>：没有版面也能对着原文看批注</sub></td>
+    <td width="50%"><img src="docs/screenshots/interview-setup.jpg" alt="面试设置"><br><sub><b>面试设置</b>：题量、追问上限、人设、岗位 JD</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/history.jpg" alt="面试记录"><br><sub><b>面试记录</b>：历史场次与得分</sub></td>
+    <td width="50%"><img src="docs/screenshots/login.jpg" alt="登录"><br><sub><b>登录</b>：租户隔离，账号由管理员开通或自助注册租户</sub></td>
+  </tr>
+</table>
+
+## 技术栈
+
+**后端**
+
+| 组件 | 版本 / 说明 |
+|---|---|
+| Java | 21 |
+| Spring Boot | 3.4.12（Web / Security / Data JPA / WebSocket / Actuator） |
+| 数据库 | MySQL 8 + Flyway 迁移（`db/migration`，可重复执行） |
+| 缓存 / 会话 | Redis |
+| 对象存储 | MinIO（简历原件、页面渲染图、导出 PDF） |
+| 消息 | Kafka（异步任务与重试队列） |
+| 检索 | Elasticsearch（关键词）+ Milvus（向量） |
+| 文档解析 | PDFBox 3.0.4、Apache POI 5.4.1 |
+| 模型接入 | LangChain4j（DashScope 通义千问、Embedding、Rerank） |
+| 认证 | JWT（jjwt）+ RBAC + 多租户 |
+
+**前端**
+
+| 组件 | 版本 / 说明 |
+|---|---|
+| React | 18 + TypeScript |
+| 构建 | Vite 5 |
+| 样式 | Tailwind CSS（自绘组件，未引入 UI 框架） |
+| 路由 | React Router 6 |
+| 图标 | lucide-react |
+
+## 架构
+
+```mermaid
+flowchart LR
+  subgraph FE["前端 React + Vite"]
+    A1[上传 / 简历库]
+    A2[批注视图]
+    A3[编辑器<br/>PDF 原位 / Markdown / 结构化]
+    A4[模拟面试]
+    A5[报告与历史]
+  end
+
+  subgraph BE["后端 Spring Boot"]
+    B1[ResumeController<br/>InterviewController]
+    B2[ResumeService<br/>InterviewService]
+    B3[ResumeParseWorker]
+    B4[多智能体<br/>Planner/Interviewer/Evaluator/Reviewer/Reporter]
+  end
+
+  subgraph INFRA["基础设施"]
+    C1[(MySQL)]
+    C2[(Redis)]
+    C3[(MinIO)]
+    C4[[Kafka]]
+    C5[(Elasticsearch)]
+    C6[(Milvus)]
+    C7[LLM / ASR / TTS]
+  end
+
+  A1 --> B1 --> B2 --> C1
+  B2 --> C3
+  B2 -- 投递解析任务 --> C4 --> B3
+  B3 --> C7
+  B2 --> C5 & C6
+  A4 --> B4 --> C7
+  B4 --> C1 & C2
+```
+
+后端按领域分包，每个包内部再分 `api / application / domain / infrastructure`：
+
+```
+com.panel
+├── interview      简历、批注、编辑层、模拟面试与报告      (77)
+├── knowledge      文档入库、双库检索、题库与刷题          (203)
+├── ai             模型网关、对话编排、工具调用、用量       (128)
+├── iam            认证、用户、邀请、RBAC                  (67)
+├── tenancy        租户、配额、设置                        (44)
+├── shared         鉴权、异常、响应、任务队列、配置          (50)
+├── agent          Agent 人设与提示词版本历史               (22)
+├── audit          操作审计与 AI 用量查询                   (21)
+├── ocr            OCR 识别                                (21)
+└── platform       平台目录与启动引导                       (10)
+```
+
+## 快速开始
+
+### 前置条件
+
+- JDK 21、Maven 3.9+
+- Node.js 18+
+- Docker（起 MySQL / Kafka；Redis / Elasticsearch / MinIO / Milvus 可按需复用本机实例）
+
+### 1. 准备配置
+
+```bash
+cp .env.example .env
+```
+
+至少填这几项：
+
+```ini
+MYSQL_HOST=localhost
+MYSQL_DATABASE=panel_ai
+MYSQL_USER=panel
+MYSQL_PASSWORD=******
+
+MINIO_ROOT_USER=minio
+MINIO_ROOT_PASSWORD=******
+
+DASHSCOPE_API_KEY=sk-******        # 模型调用必需：解析、批注、面试、语音
+```
+
+### 2. 拉起基础设施
+
+```bash
+# Windows
+start-infrastructure.bat
+# 或手动
+docker compose up -d
+```
+
+### 3. 启动后端
+
+```bash
+# Windows
+start-backend-dev.bat
+# 或手动
+cd backend && mvn spring-boot:run
+```
+
+默认监听 `8080`（可用 `SERVER_PORT` 覆盖）。首次启动 Flyway 会自动建表并执行全部迁移。
+
+### 4. 启动前端
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://localhost:5173，/api 已代理到 8080
+```
+
+### 5. 创建第一个账号
+
+注册一个租户（注册即登录，首个用户是该租户的管理员）：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"tenantCode":"demo","tenantName":"Demo","email":"demo@panel.dev","password":"********","displayName":"李想"}'
+```
+
+登录名是邮箱 `@` 前面那一段（上面的例子即 `demo`）。
+
+### 6. 跑一遍主链路
+
+登录后从「上传简历」开始：传一份 PDF → 等解析与批注 → 看批注 → 进编辑器改 → 「模拟面试」。
+
+## 目录结构
 
 ```
 Panel/
 ├── backend/
-│   ├── pom.xml                      Spring Boot 3.4.12 / Java 17（依赖已裁剪）
+│   ├── pom.xml
 │   └── src/main/
-│       ├── java/com/panel/
-│       │   ├── PanelApplication.java  启动类
-│       │   ├── ai/                   模型网关 + 对话编排 + 工具调用（120）
-│       │   ├── knowledge/            解析入库 + 混合检索 + 索引（76）
-│       │   ├── iam/                  认证 / 角色 / 权限（67）
-│       │   ├── tenancy/              租户 / 配额 / 设置（44）
-│       │   ├── shared/               鉴权 / 异常 / 响应 / 任务队列 / 配置（41）
-│       │   ├── agent/                Agent 人格 + 提示词版本历史（22）
-│       │   ├── ocr/                  DashScope OCR 识别（21）
-│       │   ├── audit/                操作审计 + AI 用量查询（20）
-│       │   └── platform/             RBAC 目录与启动引导（10）
+│       ├── java/com/panel/           领域分包（见上）
 │       └── resources/
 │           ├── application.yml       主配置（panel.* 前缀）
 │           ├── application-dev.yml   本地开发配置
-│           └── META-INF/spring/…     .env 自动加载
-├── docker-compose.yml                Kafka（+可选 MySQL）；Redis/ES/MinIO/Milvus 复用共享实例
-├── docker/elasticsearch/Dockerfile   ES 中文分词镜像（独立部署时手工加回 compose）
-├── frontend/src/                     SSE 消费 / 执行图 / 对话 API 封装
-├── scripts/migrate-from-gymmind.ps1  迁移脚本（幂等）
-├── start-infrastructure.bat          拉起 Kafka（其余中间件复用本机实例）
-├── start-backend-dev.bat             启动后端
-└── .env.example                      环境变量模板
+│           └── db/migration/         Flyway 迁移脚本
+├── frontend/
+│   ├── src/
+│   │   ├── api/                      接口封装（含 SSE 消费）
+│   │   ├── components/               编辑器、批注卡片、数字人、图表等
+│   │   ├── pages/                    路由页面
+│   │   ├── utils/                    Markdown 渲染、格式化
+│   │   └── auth/                     当前用户与权限
+│   └── public/resume-editor.html     编辑器 iframe 宿主
+├── deploy/                           Dockerfile、compose、nginx、systemd、发布脚本
+├── docs/                             设计文档与界面截图
+├── scripts/                          迁移、回归、端到端脚本
+├── docker-compose.yml
+├── start-infrastructure.bat
+├── start-backend-dev.bat
+└── .env.example
 ```
 
----
+## 几个关键设计
 
-## 3. 复用映射表
+**简历双源。** 原件（`source_*` + 编辑层 `edit_layer`）与 Markdown 内容稿（`md_source_*`）分开存。Markdown 保存只移动内容稿指针，原件指针、文件类型、内容哈希都不动 —— 所以预览、原位编辑、PDF 导出全都不受影响；反过来走纯文本通路保存时会清掉内容稿，避免下次解析读回旧内容把用户刚存的东西盖掉。
 
-### 3.1 直接可用（改包名即可）
+**编辑层是一张字典。** `edit_layer` 是 `板块 index → 富文本 HTML`，落库在简历行上，换设备也能看到自己改过的版本；本地还有一层草稿，用来处理「服务器版本被别人改过」的冲突。
 
-| 能力 | 位置 | 说明 |
-|---|---|---|
-| 模型网关 | `ai/application/ChatModelGateway` | 同步 / 流式 / 结构化 JSON / 原生工具调用四种形态 |
-| 百炼适配 | `ai/infrastructure/BailianChatAdapter` | OpenAI 兼容协议、SSE 解析、3 次重试、用量解析、错误脱敏 |
-| 向量与精排 | `ai/infrastructure/bailian/BailianEmbeddingAdapter`、`BailianRerankAdapter` | 1024 维，带维度校验与重试 |
-| 模型配置 | `ai/infrastructure/bailian/DashScopeProperties` | 模型名全部外置 |
-| 用量与计费 | `ai/application/DefaultAiUsageService` + `AiModelPricing` | token 计量、成本折算、按 feature 打点 |
-| 混合检索 | `ai/domain/HybridRetriever` + `RrfFusion` | 关键词 + 向量并行召回，单路失败自动降级 |
-| 检索编排 | `knowledge/application/DefaultKnowledgeSearchService` | 融合 → 精排 → 词面兜底 → 权限过滤 → 上下文预算 |
-| 索引端口 | `knowledge/infrastructure/search/{KeywordIndexPort,VectorIndexPort}` | ES / Milvus / 内存三种实现可切 |
-| 文档解析 | `knowledge/infrastructure/parser/DocumentParserRegistry` | PDF / DOCX / HTML / MD / TXT |
-| 分块 | `knowledge/infrastructure/parser/StructuredChunker` + `ChunkStrategySelector` | 6 种策略自动选型（需新增 RESUME 策略） |
-| 入库流水线 | `knowledge/application/KnowledgeIngestWorker` | 异步、重试、状态机 |
-| 索引代发布 | `knowledge/infrastructure/search/IndexGenerationService` | 先建新代再原子切换 |
-| OCR | `ocr/**` | 上传 → 识别 → Markdown，含每日配额 |
-| 工具调用 | `ai/harness/capability/{AiCapability,ToolGateway}` + `AiToolOrchestrator` | 模型决策 + 受控执行 |
-| 提示词分层 | `ai/chat/application/AiPromptSkeleton` | 平台 → 角色 → 租户 → 安全红线 |
-| 注入防护 | `ai/domain/PromptInjectionGuard` | 简历藏白字提示词是本项目真实风险 |
-| 流式对话 | `ai/harness/api/AiHarnessController` | SSE：token / progress / done / error |
-| 鉴权 | `shared/security/**` + `iam/**` | JWT 签发校验、token 版本失效、RBAC |
-| 配额限流 | `tenancy/**` + `shared/security/TenantRateLimitFilter` | 租户配额、每分钟限流 |
-| 审计 | `audit/**` | 操作审计 + AI 用量查询/趋势 |
-| 任务队列 | `shared/async/{RedisStream,MySql,InMemory}PersistentJobQueue` | at-least-once |
-| 对象存储 | `knowledge/infrastructure/storage/*` | Local / MinIO |
+**解析是异步的。** 上传只负责落库并投递 `RESUME_PARSE` 任务，Worker 里做解析 + 批注，期间状态停在 `PARSING / ANALYZING`。同一份简历在解析中再次保存会拿到 `409`，避免两次解析互相覆盖。
 
-### 3.2 需要改造后使用
+**批注带锚点。** 每条批注既有原文引用（`quote`）也有字符级锚点（`blockId + start/end`），PDF 侧再用文本层把 `quote` 定位成页面矩形；定位失败就退回文本视图，不会让整页崩掉。
 
-| 文件 | 改造点 |
+## 测试与回归
+
+```bash
+# 后端单元测试
+cd backend && mvn test
+
+# 主链路端到端：上传 → 编辑 → 高光定位 → 建面试 → 放弃 → 清理
+node scripts/e2e-chain.mjs
+
+# 完整一场面试（会真实调用模型，约 1 分钟）
+node scripts/smoke-interview.mjs
+```
+
+脚本用环境变量控制目标与账号：
+
+```bash
+PANEL_BASE=http://127.0.0.1:8080 PANEL_USER=admin PANEL_PASS=****** \
+  node scripts/smoke-interview.mjs
+```
+
+| 变量 | 作用 |
 |---|---|
-| `ai/harness/application/DefaultAiHarnessService` | 主流程可留，`buildAnswerRules()` 里的健身话术换成面试话术 |
-| `ai/domain/AnswerPathRouter` + `AnswerPathRuleEngine` | `RoleCode` 枚举换成 `CANDIDATE / INTERVIEWER / ADMIN`，路由规则换成简历类/岗位类/行为类 |
-| `ai/domain/ContextBudgeter` | 硬编码 `MAX_SEGMENTS=8`、`MAX_PER_DOCUMENT=2`，简历是单文档多片段，必须改成按 section 配额 |
-| `ai/infrastructure/BailianChatAdapter` | `max_tokens` 写死 256（第 40/128/180 行附近），面试长回答会被截断，需参数化 |
-| `knowledge/infrastructure/parser/ChunkStrategy` | 新增 `RESUME`：按章节标题 + 时间线切，一段经历一个 chunk |
-| `knowledge/application/DefaultKnowledgeSearchService` | 删掉价格/促销结构化段（`addStructuredPriceContext` 一带） |
-| `platform/bootstrap/PermissionCatalog` | 仍含健身权限码，需按新角色裁剪 |
-| `shared/security/CurrentActor` + `iam/domain/model/RoleCode` | 角色维度替换 |
-| `ai/harness/plugins/*`（保留的 5 个） | 仅作插件写法示例，业务能力需重写 |
+| `PANEL_BASE` | 后端地址，默认 `http://127.0.0.1:8080`（`e2e-chain.mjs` 默认 8081，按需覆盖） |
+| `PANEL_USER` / `PANEL_PASS` | 登录账号；不传则用脚本里的默认值 |
+| `PANEL_QUESTIONS` / `PANEL_FOLLOW_UPS` | 只对 `smoke-interview.mjs` 生效，控制题量与追问上限 |
 
-### 3.3 已剔除（未复制）
+## 更多设计文档
 
-```
-member/ booking/ course/ membership/ coach/ nutrition/ workout/ equipment/ exercise/ analytics/ profile/ search/ mcp/
-ai/api/{AiAnalysis,AiWeeklyReport,AiWorkoutPlan,CoachAssistant}Controller
-ai/application/{DefaultAiAnalysisService, DefaultAiWorkoutPlanDraftService, DefaultCoachAssistantService, WorkoutPlanPromptComposer, ...}
-ai/harness/plugins/{门店运营、会员流失、课程预约、会员训练、训练日历、平台AI管理、文章检索、文章导入}
-ai/harness/terminal/**            （终端读写工具，高权限，无必要）
-knowledge/bootstrap/FitnessKnowledgeDemoInitializer   （健身演示数据）
-platform/bootstrap/MemberWorkoutScheduleSchemaInitializer
-iam/application/Default{UserAdministration,UserStatistics}Service  （耦合会籍域）
-```
+仓库里留了开发过程中的方案与手册，想深入某一块可以直接看：
 
-> 保留 `UserAdministrationService` 接口（纯接口，含 `UserSummary` 记录），因为 `UserResponse` / `RoleResponse` 依赖它。后续做用户管理时补一个不依赖会籍的实现即可。
+| 文档 | 内容 |
+|---|---|
+| [简历分析与批注-开发计划](docs/简历分析与批注-开发计划.md) | 批注的数据结构与 PDF 定位方案 |
+| [数字人面试官-开发计划](docs/数字人面试官-开发计划.md) | 数字人渲染、口型与语音链路 |
+| [AI面试语音输入-设计方案](docs/AI面试语音输入-设计方案.md) | 流式 ASR 与前端按住说话 |
+| [双库RAG架构与存储设计](docs/双库RAG架构与存储设计.md) | Elasticsearch + Milvus 的分工 |
+| [部署与升级-运行手册](docs/部署与升级-运行手册.md) | 生产部署、发布与回滚 |
+
+## 关于示例数据
+
+README 中所有截图来自演示租户，简历内容为虚构人物（李想），电话、邮箱、GitHub 地址均为占位值，与任何真实个人无关。
 
 ---
 
-## 4. 与 GymMind 的差异
-
-| 维度 | GymMind | Panel |
-|---|---|---|
-| 包名 | `com.gymmind` | `com.panel` |
-| 配置前缀 | `gymmind.*` | `panel.*` |
-| 环境变量 | `GYMMIND_ES_URL` 等 | `PANEL_ES_URL` 等 |
-| JWT issuer | `GymMind` | `Panel` |
-| 品牌文案 | GymMind 智能健身助手 | Panel 面试助手 |
-| 默认插件 | 12 个（含门店运营） | 3 个（`basic_chat`、`knowledge_search`、`ai_memory`） |
-| 数据库 | `gymmind` | `panel_ai` |
-| OnlyOffice | 启用 | 默认关闭 |
-| 联网搜索 | 默认 tavily | 默认 `none` |
-
----
-
-## 5. 快速开始
-
-### 5.1 准备
-
-```bat
-copy .env.example .env
-:: 编辑 .env：填 MYSQL_PASSWORD 与 DASHSCOPE_API_KEY
-```
-
-### 5.2 起中间件
-
-Panel **不重复起** Redis / ES / etcd / MinIO / Milvus，直接用本机已在运行的那套（本机就是 GymMind 的 `gymmind-*` 容器），自己只起独有的 Kafka：
-
-```bat
-start-infrastructure.bat
-```
-
-等价于 `docker compose up -d kafka`。Kafka 约 30 秒 healthy，`docker compose ps` 出现 `panel-kafka ... (healthy)` 即可。
-
-若那套共享中间件没在跑，先去 GymMind 目录执行 `docker compose up -d`，或者改 `.env` 里的 `REDIS_HOST_PORT` / `ES_HOST_PORT` / `MINIO_API_PORT` / `MILVUS_PORT` 指向别处。
-
-共享同一套实例靠命名空间隔离，不会互相污染：
-
-| 资源 | GymMind | Panel |
-|---|---|---|
-| MySQL 库 | `gymmind` | `panel_ai` |
-| ES 索引 | `gymmind-knowledge` | `panel-knowledge`（`PANEL_ES_INDEX`） |
-| Milvus collection | `gymmind_knowledge` | `panel_knowledge`（`PANEL_MILVUS_COLLECTION`） |
-| MinIO bucket | `gymmind` | `panel-ai`（首次上传自动创建） |
-| Redis key | `gymmind:…` | `panel:<env>:v1:…` |
-
-前提是 `application-dev.yml` 里的端口指向那套正在跑的服务（本机默认就是 `6379 / 9000 / 9202 / 19530`）。
-
-### 5.3 起后端
-
-```bat
-start-backend-dev.bat
-```
-
-或手动：
-
-```powershell
-$env:JAVA_HOME='D:\java\jdk-21'
-$env:Path="$env:JAVA_HOME\bin;$env:Path"
-cd backend
-mvn spring-boot:run
-```
-
-默认端口 `8080`，健康检查 `GET /actuator/health`。
-
-#### 5.3.1 数据库 schema（Flyway）
-
-- `spring.jpa.hibernate.ddl-auto` 已改为 `validate`：Hibernate 只校验表结构，**不再建表/改表**。
-- 表结构由 `backend/src/main/resources/db/migration/` 下的 Flyway 脚本管理：
-  - `V1__baseline.sql`：当前完整基线（32 张表）。
-  - `V2__async_job.sql`：`panel.job-queue=mysql|kafka` 时才用到的队列表。
-  - `V3__kb_chat.sql` / `V4__kb_questions_and_graph.sql` / `V5__kb_catalog.sql` / `V6__kb_catalog_type_align.sql`：知识库问答、题目与图谱、知识目录及类型对齐。
-  - `V7__resume_soft_delete.sql`：简历软删除。
-  - `V8__kb_quiz.sql`：刷题闭环（`kb_quiz_session` / `kb_quiz_attempt` / `kb_category_relation`）。
-  - `V9__kb_skill_state.sql`：知识点能力值（`kb_skill_state`，用户 × 知识点一条，Elo 口径）。
-  - `V10__kb_skill_interview_import.sql`：面试信号回填台账（`kb_skill_interview_import`，`turn_id` 唯一保幂等）。
-  - `V11__account_and_data_isolation.sql`：用户级数据隔离（`resume` / `interview_session` / `kb_base` 加 `owner_user_id`）+ 邮箱验证字段与 `sys_email_verification`；只加可空列/索引/表，旧代码仍可启动。设计见 [`docs/上线方案-注册与数据隔离.md`](docs/上线方案-注册与数据隔离.md)。
-- **已有 `panel_ai` 库**：首次用新版本启动时，Flyway 会创建 `flyway_schema_history` 并把现有库标记为 V1（`baseline-on-migrate`），只补执行 V2；不会重建 V1 里的表，也不会删除任何数据。
-- **全新库**：先执行 `CREATE DATABASE panel_ai DEFAULT CHARACTER SET utf8mb4;`，再启动后端，V1 + V2 按顺序建表。
-- 以后改表：新增 `V3__xxx.sql`，不要修改已执行过的 V1/V2（Flyway 会校验 checksum）。旧开发库如需临时兼容脚本，可设 `panel.dev.legacy-schema-shim=true`。
-- 若确实要退回“完全不碰 schema”，把 `spring.flyway.enabled` 设为 `false`、`ddl-auto` 设为 `none`；但新库就需要手工导入 SQL。
-
-### 5.4 编译
-
-```powershell
-$env:JAVA_HOME='D:\java\jdk-21'
-mvn -f backend/pom.xml -DskipTests compile
-```
-
----
-
-## 6. 当前进度（RAG 知识库）
-
-- [x] 建库：`CREATE DATABASE panel_ai DEFAULT CHARACTER SET utf8mb4;`（Flyway `V1__baseline.sql` 建表，`ddl-auto=validate` 只校验；旧库 `nova_ai` 保留不动）
-- [x] 8080 已切到新构建 + `panel_ai`：`admin / 123456` 登录成功（`admin@panel.local`，56 个权限）
-- [x] K0：`kb_base` + 3 个内置库（`question-bank` / `tech-knowledge` / `job-knowledge`），`/api/v1/kb` 支持 CRUD
-- [x] 前端 `/kb` 知识库列表（`/kb/chat` 仍禁用）
-- [x] K1：文档上传 / 解析 / 切片 / 落库 / ES+Milvus 索引；`/kb/:id` 文档管理；legacy `/knowledge/*` 已关闭；ES 索引 `panel-knowledge` 已建
-- [x] K2：检索测试面板（混合/关键词/向量 + rerank + 阈值）、`kbId` 双端过滤、重建索引；`/kb/:id?tab=search`
-- [x] 刷题闭环：抽题（分层 + 加权）→ 只看题面 → 展开答案 → 自评 → 错题落知识点；`/kb/quiz`；覆盖率看板接口；知识点关系 CRUD
-- [x] 能力值模型：`kb_skill_state` + Elo 口径更新（难度/学习率衰减/遗忘回落/面试 2 倍权重）+ 树形聚合；`/kb/quiz/skills`；抽题权重已切到 `wrongRate^1.5`（`panel.kb.quiz.skill-weight` 可关闭做 A/B）
-- [x] 面试信号接入：`interview_turn.skill` 名字对齐知识点 + 得分折算观测 + `turn_id` 台账幂等回填（`/quiz/skills/interview-backfill`，目录页有「面试信号回填」按钮）
-- [x] 按文档一键归类：`/catalog/documents/{documentId}/classify`（`redoLowConfidence` 清低置信重跑），刷题页「按文档看缺口」每行一个按钮
-- [x] 知识树 v1：全栈+Agent 方向 5 领域 / 30 主题 / 179 考点（214 节点），建在题库库并继承到技术知识库，`tmp/kb-tree/sync.js` 幂等可复跑；见 [`docs/知识树-v1.md`](docs/知识树-v1.md)
-- [x] 外部索引降级：ES/Milvus 未启动时上传仍能 `READY`（`generation=local-*`）、文档/知识库删除不再 500，检索返回 503 并说明原因；详情页新增「删除知识库」入口；回归用例 `KbIndexerDegradeTest`
-- [x] 目录树就地编辑：左侧树上双击改名、悬停 `＋` 建子级、拖拽换层级/调顺序、行内确认删除（`cascade=true` 删子树，题目/切片只摘挂载回到「未分类」）；`move` 补 `beforeId` 排序与 `parent_id` 修正，改名同步重写 `path_key`
-- [x] 未归类可见 + 规则兜底增强：目录页头「还有 N 个切片/题目没挂目录」黄条（一键归类 / 看未分类）；`KbAutoClassifyService.fragmentScore` 支持带括号节点名的片段匹配（英文整词 + 中文 2-gram，命中 ≥2 才挂，0.72~0.78），模型不可用时不再全军覆没；用例 `KbAutoClassifyFragmentTest`
-- [x] 任务队列兼容老 Redis：`RedisStreamPersistentJobQueue` 探测到 `XADD/XGROUP unknown command`（本机 Redis 3.2）就永久降级为 ZSET 索引 + 定时轮询，不再把异常抛到调度线程顶层崩掉进程；用例 `RedisStreamPersistentJobQueueDegradeTest`
-- [x] 归属状态可见：条目卡片标 `✓ 待确认 92%`（可点）/ `✓ 已确认`，页头 `确认归属` 一键锁全库（`POST /catalog/items/confirm-all`）；条目 DTO 补 `categoryId / locked / confidence / linkSource`
-- [x] 题库解析以整篇为准：Markdown 保留 `1.` 题号，`KbQuestionParser.parse(正文, chunks)` 先拆题再反查切片——8 题的文档切成 4 片仍出 8 题，不再把文档标题当题干；标签只取该题段落
-- [x] 异步调度不再被单个坏任务拖垮：事务只包「领取」，handler 在事务外执行并兜住异常；`ResumeParseWorker` 的重试入队自兜（此前会把 `UnexpectedRollbackException` 甩到调度线程顶层）
-- [x] 「做过」只算题库里还在的题：`countDistinctQuestions` 加 `in` 子句，重传文档后不会再出现「做过 13 / 总题数 8」；空题库覆盖率报 0 而不是 100%
-- [x] 空题库不再假装能刷：`开始刷题` 置灰，空态直接说「先去知识库管理上传题库文档」（此前点下去只得到 `CONFLICT`）；`stats.recentSessions` 跳过「一道活题都没有」的僵尸会话
-- [x] 界面不再对用户撒谎：归类报告改成"跑前跑后差集"计数（`KbClassifyResult.summary`，连点两次不会报两遍，也不会出现库里 8 条报告 12 条）；首屏加载出骨架而不显示 0；0 次作答时正确率显示 `—`。设计与验收见 [知识库体验改造方案](docs/知识库体验改造方案.md)
-- [x] 导航按"人要做什么"收敛：侧栏只剩 **我的资料 / 练习 / 问答**（`面试题库` 不再是第四个平级入口）；进库后一条页签切 **资料 · 目录 · 练习 · 问答**，`/kb/:id/quiz`、`/kb/:id/chat` 为新增路由，老链接 `/kb/quiz?kbId=`、`/kb/chat?kbId=`、`/kb/questions` 继续可用
-- [x] 自动归类不再"181 选 1"：先把内容定到 30 个主题之一（主题词命中就不问模型），再在该主题的 6~10 个叶子里选；222 个目录节点全部补上"放什么、不放什么"的说明；选串了按域锚词打折留空。手法与实测见 [知识库归类准确率](docs/知识库归类准确率.md)
-- [x] 带代码块的 Markdown 从"传不上去"修到"能读能抄"：围栏行曾被当正文洗成空串（整篇卡在「失败 / 切片 0」）；随后发现代码被 `strip()` 掉缩进、被切片器从中间劈开、`idx_name_age` 这类标识符被 markdown 清洗成 `idxnameage`。现在围栏内缩进原样保留、一段代码是不可切的原子块（88 个含代码切片，0 个被切断）、清洗只去真装饰，知识点和题目详情都渲染成深色 `<pre>`
-- [x] 抽题边界靠标题而不是猜：`plainText()` 保留 `##` 前缀并把代码块连围栏一起带下去，题目只认"像题目的标题"，答案里从 1 重来的有序列表不再被当成新题——「MyBatis 中 # 和 $ 的区别」的答案从 1554 字符（吞了 AOP、数组、List 三节）回到 275 字符
-- [x] 切片标题带上所属题目（「4. MyBatis 中 # 和 $ 的区别 · 简短回答」）并用「章节 → 主题」表跨批继承，归类不再靠猜
-- [ ] K3 问答、K4 Agent 接入、K5 评测
-
-完整设计见 [`docs/RAG知识库-设计方案.md`](docs/RAG知识库-设计方案.md)；刷题链路见 [`docs/刷题与知识点联动.md`](docs/刷题与知识点联动.md)；业务视角与截图见 [`docs/知识库与刷题业务设计.md`](docs/知识库与刷题业务设计.md)；知识树见 [`docs/知识树-v1.md`](docs/知识树-v1.md)。
-
-### 6.1 知识库接口
-
-| 方法 | 路径 | 权限 | 说明 |
-|---|---|---|---|
-| GET | `/api/v1/kb` | `knowledge:read` | 库列表（内置库在前，带文档/切片数） |
-| POST | `/api/v1/kb` | `knowledge:write` | 新建库，返回 201 |
-| GET | `/api/v1/kb/{id}` | `knowledge:read` | 库详情 |
-| PATCH | `/api/v1/kb/{id}` | `knowledge:write` | 改名称/描述/可见性/切片参数 |
-| DELETE | `/api/v1/kb/{id}` | `knowledge:write` | 删除自定义库，204；内置库 409；有文档需 `?force=true` |
-| POST | `/api/v1/kb/{id}/documents` | `knowledge:write` | multipart 单文件，202；同库同内容 409 |
-| GET | `/api/v1/kb/{id}/documents` | `knowledge:read` | 分页 + `status` / `keyword` || GET | `/api/v1/kb/documents/{docId}` | `knowledge:read` | 文档详情（状态/错误/切片数） |
-| GET | `/api/v1/kb/documents/{docId}/chunks` | `knowledge:read` | 切片分页 |
-| POST | `/api/v1/kb/documents/{docId}/retry` | `knowledge:write` | 失败重试，202 |
-| PATCH | `/api/v1/kb/documents/{docId}/publication` | `knowledge:write` | 发布 / 下线 |
-| DELETE | `/api/v1/kb/documents/{docId}` | `knowledge:write` | 204，同时清索引与对象 |
-| GET | `/api/v1/kb/documents/{docId}/download` | `knowledge:read` | 原文件下载 |
-| POST | `/api/v1/kb/documents/{docId}/reindex` | `knowledge:write` | 从已落库切片重建索引，202 |
-| POST | `/api/v1/kb/{id}/search` | `knowledge:read` | `{query, topK?, mode?, rerank?, publishedOnly?}`，返回 `hits + debug` |
-
-> 入库是异步的：上传返回 202，前端每 2~3 秒轮询 `GET /kb/documents/{id}`，状态机 `UPLOADING → PARSING → CHUNKED → INDEXING → READY | FAILED`。
-> 开发环境可用 `/dev-login?token=<JWT>&actor=admin&next=/kb` 直接进页面截图；`actor=admin` 仅用于本地冒烟。
-> 旧接口 `/api/v1/knowledge/*` 已通过 `@Profile("legacy-knowledge")` 关闭，默认 404。
-
-### 6.2 刷题接口
-
-| 方法 | 路径 | 权限 | 说明 |
-|---|---|---|---|
-| POST | `/api/v1/kb/{kbId}/quiz` | `knowledge:read` | `{size?}`（默认 5，最大 20），201；**返回体不含答案** |
-| GET | `/api/v1/kb/quiz/sessions/{sessionId}` | `knowledge:read` | 会话详情，刷新可恢复 |
-| POST | `/api/v1/kb/quiz/attempts/{attemptId}/reveal` | `knowledge:read` | 展开答案 + 知识点 + 相关知识点 |
-| POST | `/api/v1/kb/quiz/attempts/{attemptId}/grade` | `knowledge:read` | `{result: CORRECT\|WRONG\|UNSURE\|SKIPPED}`；最后一题答完自动收尾并返回 summary |
-| GET | `/api/v1/kb/{kbId}/quiz/stats` | `knowledge:read` | 题量/挂载/做过/正确率/薄弱知识点/最近 5 组 |
-| GET | `/api/v1/kb/{kbId}/quiz/wrong-book?limit=50` | `knowledge:read` | 错题本（带知识点路径） |
-| GET | `/api/v1/kb/{kbId}/quiz/skills` | `knowledge:read` | 能力值：叶子按弱到强排、父节点按题量加权聚合；含 `wrongRate`（下次答错概率）；不限题库 |
-| POST | `/api/v1/kb/{kbId}/quiz/skills/interview-backfill` | `knowledge:write` | 面试记录回填能力值：`?userId=&dryRun=&createMissing=&rootName=`，按 `turn_id` 幂等 |
-| GET | `/api/v1/kb/{kbId}/catalog/coverage` | `knowledge:read` | 目录覆盖率 + 缺口队列（低置信在前、未分类在后，各 ≤20 条） |
-| POST | `/api/v1/kb/{kbId}/catalog/items/{itemType}/{itemId}/confirm` | `knowledge:write` | 确认归属：锁定 + 置信度 1.0，自动归类不再覆盖 |
-| POST | `/api/v1/kb/{kbId}/catalog/items/confirm-batch` | `knowledge:write` | `{itemType,itemIds[]}` 批量确认，没挂载的跳过，返回 `{confirmed,skipped}` |
-| POST | `/api/v1/kb/{kbId}/catalog/import?sourceKbId=` | `knowledge:write` | 继承另一个库的目录树（按 `path_key` 去重、幂等） |
-| POST | `/api/v1/kb/{kbId}/catalog/categories` | `knowledge:write` | `{parentId,name,description?,pathKey?}`，父节点为 0/null 即一级 |
-| PATCH | `/api/v1/kb/catalog/categories/{id}` | `knowledge:write` | 改名（`description` 传 null = 不动），`path_key` 与子树同步重写 |
-| POST | `/api/v1/kb/catalog/categories/{id}/move` | `knowledge:write` | `{parentId,beforeId}`：换父 + 同级排序，重算子树 `path/path_key/depth` |
-| DELETE | `/api/v1/kb/catalog/categories/{id}` | `knowledge:write` | 空节点才能删；`?cascade=true` 删整棵子树，题目/切片只摘挂载回「未分类」 |
-| POST | `/api/v1/kb/{kbId}/catalog/documents/{documentId}/classify` | `knowledge:write` | 按文档一键归类；`?redoLowConfidence=true` 先清未锁定的低置信挂载再重跑 |
-| GET/POST | `/api/v1/kb/{kbId}/catalog/relations` | `knowledge:read` / `write` | 知识点横向关系（RELATED / PREREQUISITE / CONTRAST） |
-| DELETE | `/api/v1/kb/{kbId}/catalog/relations/{relationId}` | `knowledge:write` | 204 |
-
-> 只有 `kind=QUESTION_BANK` 的库能抽题。抽题**不调用 ES/Milvus**：题目是抽样问题、知识点是目录问题，相似度在这里没有用武之地；向量只服务于 `/kb/chat` 和"题 → 知识点候选"这类需要语义的地方。
-> `/api/v1/kb/{kbId}/questions`（题库浏览）列表**不返回答案**，答案只在 `/api/v1/kb/questions/{id}` 详情里，避免在浏览列表时提前看到答案。
-> **可见性已强制**：`kb_base.visibility=INTERNAL` 只对 `PLATFORM_ADMIN` / `ADMIN` / `INTERVIEWER` 开放。`GET /kb` 会过滤，其余读接口（目录、文档、检索、问答、刷题、覆盖率）走 `KbAccessGuard.ensureReadable`，直连 id 返回 403。
-> 登录依赖 Redis（`/auth/login` 走会话存储），本地没起 Redis 时会被 `DEPENDENCY_UNAVAILABLE` 挡住。
-
----
-
-## 7. 注意事项
-
-1. **`frontend/src` 已是可运行的 Panel 前端**（`pnpm dev`，5173，`/api` 代理到 8080）；其中 `sseStream.ts`、`aiExecutionGraph.ts`、`api/harness.ts` 三份仍复用自 GymMind。
-2. **重新同步上游**：改完 GymMind 的 AI 层后，重跑 `scripts/migrate-from-gymmind.ps1` 即可覆盖刷新（脚本会清空 `com/panel` 后重建）。
-3. **测试未迁移**：新增业务代码请配套单测，不要沿用 GymMind 的健身夹具。
-4. **旧业务表保留 `tenantId`**（个人版固定单租户）；知识库新表 `kb_*` 不再带 `tenant_id`。
-5. **`target/` 为编译产物**，已在 `.gitignore` 中。
+<div align="center">
+<sub>如果这个项目对你有帮助，欢迎提 Issue 或 PR。</sub>
+</div>
