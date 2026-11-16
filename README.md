@@ -270,7 +270,13 @@ npm run dev          # http://localhost:5173，/api 已代理到 8080
 
 ### 5. 创建第一个账号
 
-注册一个租户（注册即登录，首个用户是该租户的管理员）：
+浏览器打开 <http://localhost:5173>，在登录页点「注册一个工作区」，填工作区名称、标识、姓名、邮箱和密码 —— 提交后直接以这个工作区的管理员身份进去。
+
+<p align="center">
+  <img src="docs/screenshots/register-filled.jpg" alt="注册工作区" width="860">
+</p>
+
+也可以直接调接口（注册即登录）：
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/register \
@@ -278,7 +284,7 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
   -d '{"tenantCode":"myteam","tenantName":"My Team","email":"you@example.com","password":"<自己设一个强密码>","displayName":"张三"}'
 ```
 
-登录名是邮箱 `@` 前面那一段（上面的例子即 `you`）。
+登录名是邮箱 `@` 前面那一段（上面的例子即 `you`）。注册出来的是独立工作区：简历、面试记录、知识库按工作区隔离，重名或邮箱已被占用时接口返回 `409`，页面上会提示换一个标识。
 
 ### 6. 跑一遍主链路
 

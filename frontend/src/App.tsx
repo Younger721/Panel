@@ -5,6 +5,7 @@ import { setActor } from '@/auth/actor'
 import AppLayout from '@/components/AppLayout'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import LoginPage from '@/pages/LoginPage'
+import RegisterPage from '@/pages/RegisterPage'
 import UploadPage from '@/pages/UploadPage'
 import ResumeListPage from '@/pages/ResumeListPage'
 import ResumePage from '@/pages/ResumePage'
@@ -69,6 +70,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
       {import.meta.env.DEV && <Route path="/dev-login" element={<DevLogin />} />}
       <Route
         path="/"

@@ -124,6 +124,21 @@ public class GlobalExceptionHandler {
                         "内容已在别处被修改，请刷新后重试"));
     }
 
+    /**
+     * 唯一约束冲突 → 409。
+     *
+     * <p>注册时租户标识或邮箱重复，是最常被踩到的一种：请求本身没毛病，只是这条数据已经存在。
+     * 让它掉进兜底的 500，用户只会看到「服务器内部错误」，既猜不到原因也没法自己纠正，
+     * 所以单独拦下来回 409，前端就能提示「这个邮箱或工作区标识已经被用了」。</p>
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(Exception exception) {
+        log.info("唯一约束冲突：{}", safeDiagnostics(exception));
+        return ResponseEntity.status(ErrorCode.CONFLICT.status())
+                .body(ApiResponse.error(ErrorCode.CONFLICT.name(),
+                        "这条数据已经存在了，请检查是否重复提交，或换一个标识再试"));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception exception) {
         log.error("Unhandled request failure ({})", safeDiagnostics(exception));
