@@ -75,7 +75,9 @@ Markdown 内容稿与原件是**双源**关系：内容稿只影响「解析与�
 ### 模拟面试
 
 <p align="center">
-  <img src="docs/screenshots/interview-live.jpg" alt="数字人面试官" width="100%">
+  <img src="docs/screenshots/interview-qna.jpg" alt="数字人面试官按简历提问" width="100%">
+  <br>
+  <sub>问题从简历里长出来：简历写了 RocketMQ 和 Kafka，就追问「分别用在什么场景、为什么不能互换」</sub>
 </p>
 
 - **数字人面试官**：实时视频形象 + 语音播报，三种人设（严肃型技术面试官等）
@@ -88,6 +90,13 @@ Markdown 内容稿与原件是**双源**关系：内容稿只影响「解析与�
   - `Reporter` 汇总成报告
 - **追问**：按人设阈值触发，追几层可配（0–3）
 - **状态机**：`IN_PROGRESS → COMPLETED / ABANDONED`，中途退出可以主动结束
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/interview-transcript.jpg" alt="面试记录抽屉"><br><sub><b>随时回看</b>：点「记录」拉开抽屉，每轮问答与作答原文都在</sub></td>
+    <td width="50%"><img src="docs/screenshots/interview-done.jpg" alt="面试结束"><br><sub><b>结束即复盘</b>：答完全部主问题后直接进报告，中途也能手动结束</sub></td>
+  </tr>
+</table>
 
 ### 复盘报告
 
