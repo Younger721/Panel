@@ -33,3 +33,12 @@ dist/
 
 # ±æµÿ√∞—ÃΩ≈±æ
 .smoke/
+
+# ---------- local temp artifacts ----------
+/tmp_*/
+.acl-reports/
+/grade-body.json
+/quiz-body.json
+/reveal-body.json
+/milk_tea.png
+/tmp_*.py

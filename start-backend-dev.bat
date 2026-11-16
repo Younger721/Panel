@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ======================================
-echo  Nova AI Backend (dev)
+echo  Panel Backend (dev)
 echo ======================================
 
 call "%~dp0scripts\load-root-env.bat"

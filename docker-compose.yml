@@ -1,140 +1,18 @@
+# Panel 本地依赖（最小集）
+#
+# 默认复用本机已在运行的中间件（通常就是 GymMind 那套 gymmind-* 容器）：
+#   Redis   localhost:6379    会话 / 异步任务队列
+#   ES      localhost:9202    关键词检索（索引 panel-knowledge）
+#   MinIO   localhost:9000    对象存储（bucket panel-ai）
+#   Milvus  localhost:19530   向量检索（collection panel_knowledge）
+#   MySQL   localhost:3306    库 panel_ai（宿主机安装）
+# 两套服务靠命名空间隔离（panel:… / gymmind:…，索引、collection、bucket 均不同名），
+# 因此这里只保留 Panel 独有的 Kafka，不再重复起一套 Redis/ES/MinIO/Milvus。
 services:
-  # Redis 7 - 缓存、会话、异步任务队列（Redis Stream）
-  redis:
-    image: redis:7-alpine
-    container_name: nova-redis
-    restart: unless-stopped
-    ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 5s
-
-  # Elasticsearch 9.4.2 + 中文分词（自定义镜像，见 docker/elasticsearch）
-  elasticsearch:
-    build:
-      context: ./docker/elasticsearch
-      dockerfile: Dockerfile
-    image: nova-elasticsearch:9.4.2-smartcn
-    container_name: nova-es
-    restart: unless-stopped
-    environment:
-      discovery.type: single-node
-      xpack.security.enabled: "false"
-      ES_JAVA_OPTS: -Xms512m -Xmx512m
-    ports:
-      - "${ES_HOST_PORT:-9202}:9200"
-    volumes:
-      - es_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 40s
-
-  # etcd - Milvus 元数据
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.16
-    container_name: nova-etcd
-    restart: unless-stopped
-    environment:
-      ETCD_AUTO_COMPACTION_MODE: revision
-      ETCD_AUTO_COMPACTION_RETENTION: "1000"
-      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
-    command: >
-      etcd
-      -advertise-client-urls=http://etcd:2379
-      -listen-client-urls=http://0.0.0.0:2379
-      --data-dir=/etcd
-    volumes:
-      - etcd_data:/etcd
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  # MinIO - 对象存储（简历原件、Milvus 底层存储）
-  minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    container_name: nova-minio
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
-    command: minio server /minio_data --console-address ":9001"
-    ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - minio_data:/minio_data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-
-  # Milvus - 向量数据库
-  milvus:
-    image: milvusdb/milvus:v2.4.17
-    container_name: nova-milvus
-    restart: unless-stopped
-    command: ["milvus", "run", "standalone"]
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
-      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
-    ports:
-      - "${MILVUS_PORT:-19530}:19530"
-      - "9091:9091"
-    depends_on:
-      etcd:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    volumes:
-      - milvus_data:/var/lib/milvus
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 15s
-      timeout: 10s
-      retries: 30
-      start_period: 60s
-
-  # 可选：容器内 MySQL（默认关闭，本机已有 MySQL 时用 USE_DOCKER_MYSQL=0）
-  mysql:
-    profiles: ["mysql"]
-    image: mysql:8.0
-    container_name: nova-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required when USE_DOCKER_MYSQL=1}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-nova_ai}
-    ports:
-      - "${MYSQL_HOST_PORT:-3307}:3306"
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
-
   # Kafka 3.9.1 - KRaft 单节点（无 ZooKeeper）：任务分发与进度事件
   kafka:
     image: apache/kafka:3.9.1
-    container_name: nova-kafka
+    container_name: panel-kafka
     restart: unless-stopped
     ports:
       - "${KAFKA_HOST_PORT:-9092}:9092"
@@ -160,11 +38,27 @@ services:
       retries: 20
       start_period: 30s
 
+  # 可选：容器内 MySQL（默认关闭，本机已有 MySQL 时用 USE_DOCKER_MYSQL=0）
+  mysql:
+    profiles: ["mysql"]
+    image: mysql:8.0
+    container_name: panel-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required when USE_DOCKER_MYSQL=1}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-panel_ai}
+    ports:
+      - "${MYSQL_HOST_PORT:-3307}:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
 volumes:
-  redis_data:
-  es_data:
-  etcd_data:
-  minio_data:
-  milvus_data:
-  mysql_data:
   kafka_data:
+  mysql_data:
