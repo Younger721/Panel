@@ -71,13 +71,22 @@ export default function ResumePage() {
     let timer: number | undefined
     setLoading(true)
 
-    // 重新分析时状态会回到 PENDING，这里跟着轮询，PARSED 后批注自动换新
+    // 重新分析时状态会回到 PENDING，这里跟着轮询，PARSED 后批注自动换新。
+    // 注意两件事：
+    //   1) 一次网络抖动不该终止轮询（以前 find 失败会当成"已结算"直接停掉），
+    //      所以沿用上一次拿到的状态继续等；
+    //   2) 轮询要有上限，否则解析真的卡死时页面会一直转圈——上限到了就交给用户手动重试。
+    let lastMeta: Awaited<ReturnType<typeof resumeApi.find>> | null = null
+    let attempts = 0
     const poll = async () => {
-      const meta = await resumeApi.find(resumeId).catch(() => null)
+      attempts += 1
+      const fetched = await resumeApi.find(resumeId).catch(() => null)
       if (cancelled) {
         return
       }
-      const settled = !meta || meta.status === 'PARSED'
+      const meta = fetched ?? lastMeta
+      lastMeta = meta
+      const settled = meta ? meta.status === 'PARSED' || meta.status === 'FAILED' : false
       try {
         const view = await resumeApi.analysis(resumeId)
         if (cancelled) {
@@ -94,12 +103,18 @@ export default function ResumePage() {
           setError(err instanceof Error ? err.message : '加载失败')
         }
       }
-      setResume(meta)
+      setResume(meta ?? null)
       setLoading(false)
       if (settled) {
         setReparsing(null)
+        if (meta?.status === 'FAILED' && meta.lastError) {
+          setError(meta.lastError)
+        }
+      } else if (attempts >= 100) {
+        setReparsing(null)
+        setError('解析用时超出预期，可以刷新页面或到「简历库」点重新分析')
       } else {
-        setReparsing(meta.status)
+        setReparsing(meta?.status ?? 'PENDING')
         timer = window.setTimeout(() => void poll(), 3000)
       }
     }
@@ -167,6 +182,7 @@ export default function ResumePage() {
           module.points.map(point => ({
             pointId: point.id,
             quote: point.quote,
+            focus: point.focus ?? null,
             fallback: point.anchor?.blockId ? blockTexts.get(point.anchor.blockId) ?? null : null
           }))
         )
@@ -546,6 +562,8 @@ export default function ResumePage() {
                 index={index + 1}
                 active={hovered === item.point.id}
                 top={tops[item.point.id] ?? 0}
+                quote={highlights[item.point.id]?.text}
+                focus={item.point.focus ?? highlights[item.point.id]?.focus}
                 onHover={setHover}
                 register={registerCard}
                 onFocusPoint={focusPoint}
@@ -565,6 +583,8 @@ export default function ResumePage() {
               active
               layered={false}
               top={0}
+              quote={highlights[item.point.id]?.text}
+              focus={item.point.focus ?? highlights[item.point.id]?.focus}
               onHover={setHover}
               register={registerCard}
               onFocusPoint={focusPoint}

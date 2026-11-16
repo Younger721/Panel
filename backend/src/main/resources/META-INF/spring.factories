@@ -1,1 +1,1 @@
-org.springframework.boot.env.EnvironmentPostProcessor=com.nova.shared.config.DotEnvEnvironmentPostProcessor
+org.springframework.boot.env.EnvironmentPostProcessor=com.panel.shared.config.DotEnvEnvironmentPostProcessor

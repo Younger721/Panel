@@ -82,7 +82,7 @@ function splitEntryTitle(text: string): { meta: string; title: string } {
   if (matched && tidy(matched[2])) {
     return { meta: normalizeRange(matched[1]), title: tidyTitle(matched[2]) }
   }
-  // 「Nova AI 智能面试平台（2024.03-至今）」这类把时间写在括号里的
+  // 「Panel 智能面试平台（2024.03-至今）」这类把时间写在括号里的
   const inParens = DATE_IN_PARENS.exec(plain)
   if (inParens && tidy(inParens[1])) {
     return { meta: normalizeRange(inParens[2]), title: tidyTitle(inParens[1]) }

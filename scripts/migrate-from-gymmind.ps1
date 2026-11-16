@@ -1,13 +1,13 @@
 #requires -Version 5.1
 <#
-  Copies the reusable AI / RAG / middleware slice of GymMind into Nova AI.
+  Copies the reusable AI / RAG / middleware slice of GymMind into Panel.
 
   What it does:
-    1. clears backend/src/main/java/com/nova (fresh, deterministic output)
+    1. clears backend/src/main/java/com/panel (fresh, deterministic output)
     2. copies a curated file set (ai, knowledge, ocr, shared, iam, tenancy, audit, agent, platform)
     3. skips the fitness-business classes that the AI layer does not need
-    4. rewrites packages: com.gymmind -> com.nova
-    5. rewrites brand/class prefixes: GymMind -> Nova, gymmind -> nova
+    4. rewrites packages: com.gymmind -> com.panel
+    5. rewrites brand/class prefixes: GymMind -> Panel, gymmind -> panel
     6. renames the two classes whose names carry the old brand
 
   IMPORTANT: keep this file ASCII-only. Windows PowerShell 5.1 reads a
@@ -20,12 +20,14 @@
 $ErrorActionPreference = 'Stop'
 
 $SourceRoot = 'D:\java\project\full-project\GymMind'
-$TargetRoot = 'D:\java\project\full-project\Nova AI'
+# derive the target from this script's own location, so renaming the project
+# folder never breaks the migration again
+$TargetRoot = Split-Path -Parent $PSScriptRoot
 
 $SourceJava = Join-Path $SourceRoot 'backend\src\main\java\com\gymmind'
-$TargetJava = Join-Path $TargetRoot 'backend\src\main\java\com\nova'
+$TargetJava = Join-Path $TargetRoot 'backend\src\main\java\com\panel'
 
-if (-not $TargetJava.EndsWith('com\nova')) {
+if (-not $TargetJava.EndsWith('com\panel')) {
     throw "refusing to clear unexpected target: $TargetJava"
 }
 
@@ -167,10 +169,10 @@ foreach ($relative in $collected) {
 
     # brand-carrying class names
     if ($relative -eq 'GymMindApplication.java') {
-        $targetPath = Join-Path $TargetJava 'NovaApplication.java'
+        $targetPath = Join-Path $TargetJava 'PanelApplication.java'
     }
     if ($relative -eq 'shared/security/GymMindPrincipal.java') {
-        $targetPath = Join-Path $TargetJava 'shared\security\NovaPrincipal.java'
+        $targetPath = Join-Path $TargetJava 'shared\security\PanelPrincipal.java'
     }
 
     $targetDir = Split-Path $targetPath -Parent
@@ -181,11 +183,11 @@ foreach ($relative in $collected) {
     $text = [System.IO.File]::ReadAllText($sourcePath, [System.Text.Encoding]::UTF8)
 
     # package first, then brand, then lowercase config keys, then env vars
-    $text = $text.Replace('com.gymmind', 'com.nova')
-    $text = $text.Replace('GymMind', 'Nova')
-    $text = $text.Replace('gymMind', 'nova')
-    $text = $text.Replace('gymmind', 'nova')
-    $text = $text.Replace('GYMMIND', 'NOVA')
+    $text = $text.Replace('com.gymmind', 'com.panel')
+    $text = $text.Replace('GymMind', 'Panel')
+    $text = $text.Replace('gymMind', 'panel')
+    $text = $text.Replace('gymmind', 'panel')
+    $text = $text.Replace('GYMMIND', 'PANEL')
 
     [System.IO.File]::WriteAllText($targetPath, $text, $Utf8NoBom)
     $written++
@@ -197,7 +199,7 @@ foreach ($relative in $collected) {
 $copiedByPackage = $collected | Group-Object { ($_ -split '/')[0] } | Sort-Object Name
 
 Write-Host ''
-Write-Host 'Nova AI migration complete'
+Write-Host 'Panel migration complete'
 Write-Host "  source : $SourceJava"
 Write-Host "  target : $TargetJava"
 Write-Host "  files  : $written"

@@ -1,11 +1,11 @@
 # 本地全栈开发（唯一推荐 profile：dev）
-# 前置：本机 MySQL + start-infrastructure.bat 拉起 Redis/ES/Milvus/MinIO
+# 前置：本机 MySQL + 共享的 Redis/ES/Milvus/MinIO（默认复用 GymMind 那套）+ start-infrastructure.bat 拉起 Kafka
 spring:
   config:
     activate:
       on-profile: dev
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:nova_ai}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:panel_ai}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -14,51 +14,67 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_HOST_PORT:6379}
   kafka:
-    bootstrap-servers: ${NOVA_KAFKA_BOOTSTRAP:localhost:9092}
+    bootstrap-servers: ${PANEL_KAFKA_BOOTSTRAP:localhost:9092}
     consumer:
       auto-offset-reset: earliest
       enable-auto-commit: false
     listener:
       ack-mode: record
-  jpa:
-    hibernate:
-      ddl-auto: update
-    open-in-view: false
 
 platform-admin:
-  email: ${PLATFORM_ADMIN_EMAIL:admin@nova.local}
+  email: ${PLATFORM_ADMIN_EMAIL:admin@panel.local}
   username: ${PLATFORM_ADMIN_USERNAME:admin}
   password: ${PLATFORM_ADMIN_PASSWORD:123456}
   force-password-sync: ${PLATFORM_ADMIN_FORCE_PASSWORD_SYNC:false}
 
-nova:
+panel:
   environment: dev
   dev:
-    reset-demo-password: ${NOVA_RESET_DEMO_PASSWORD:false}
-  job-queue: ${NOVA_JOB_QUEUE:redis}
+    reset-demo-password: ${PANEL_RESET_DEMO_PASSWORD:false}
+    # 仅旧开发库需要临时打开；默认关闭，schema 统一由 Flyway 管理
+    legacy-schema-shim: ${PANEL_LEGACY_SCHEMA_SHIM:false}
+  # 本地 Redis 若是 3.x（没有 Streams），RedisStreamPersistentJobQueue 会自动降级成
+  # ZSET 索引 + 5 秒轮询，不报错；要完全绕开可设 PANEL_JOB_QUEUE=mysql
+  job-queue: ${PANEL_JOB_QUEUE:redis}
   kafka:
-    job-topic: ${NOVA_KAFKA_JOB_TOPIC:nova.async.job.ready}
-    dlq-topic: ${NOVA_KAFKA_DLQ_TOPIC:nova.async.job.dlq}
-    consumer-group: ${NOVA_KAFKA_CONSUMER_GROUP:nova-ingest-workers}
+    job-topic: ${PANEL_KAFKA_JOB_TOPIC:panel.async.job.ready}
+    dlq-topic: ${PANEL_KAFKA_DLQ_TOPIC:panel.async.job.dlq}
+    consumer-group: ${PANEL_KAFKA_CONSUMER_GROUP:panel-ingest-workers}
   object-store: minio
-  object-store.minio-endpoint: ${NOVA_OBJECT_STORE_MINIO_ENDPOINT:http://localhost:9000}
-  object-store.minio-access-key: ${NOVA_OBJECT_STORE_MINIO_ACCESS_KEY:minioadmin}
-  object-store.minio-secret-key: ${NOVA_OBJECT_STORE_MINIO_SECRET_KEY:minioadmin123}
-  object-store.minio-bucket: ${NOVA_OBJECT_STORE_MINIO_BUCKET:nova-ai}
+  interview:
+    analysis:
+      # 一份简历逐模块点评的并发数。4 是单份简历的实测最优（6 个模块约 40 秒）；
+      # 批量入库时模型侧 QPS 是和所有请求共享的，按实际配额往下调（2 更稳）。
+      # 范围 1~8，超出自动夹紧。
+      max-parallel-modules: 4
+    study-plan:
+      # 报告里 skillScores 低于这个分，才在"下一步学什么"里给复习材料。
+      # 调高（比如 85）等于"每场面试都给计划"，适合演示；线上保持 60。
+      weak-threshold: 60
+  object-store.minio-endpoint: ${PANEL_OBJECT_STORE_MINIO_ENDPOINT:http://localhost:9000}
+  object-store.minio-access-key: ${PANEL_OBJECT_STORE_MINIO_ACCESS_KEY:minioadmin}
+  object-store.minio-secret-key: ${PANEL_OBJECT_STORE_MINIO_SECRET_KEY:minioadmin123}
+  object-store.minio-bucket: ${PANEL_OBJECT_STORE_MINIO_BUCKET:panel-ai}
   search:
     keyword-backend: elasticsearch
     vector-backend: milvus
-    elasticsearch-url: ${NOVA_ES_URL:http://localhost:9202}
-    milvus-url: ${NOVA_MILVUS_URL:http://localhost:19530}
-    recover-published: ${NOVA_SEARCH_RECOVER_PUBLISHED:false}
-    recover-incomplete-ingest: ${NOVA_SEARCH_RECOVER_INCOMPLETE_INGEST:true}
-    recover-index-on-start: ${NOVA_SEARCH_RECOVER_INDEX_ON_START:false}
-    require-dual-recall: ${NOVA_SEARCH_REQUIRE_DUAL_RECALL:false}
+    elasticsearch-url: ${PANEL_ES_URL:http://localhost:9202}
+    milvus-url: ${PANEL_MILVUS_URL:http://localhost:19530}
+    recover-published: ${PANEL_SEARCH_RECOVER_PUBLISHED:false}
+    recover-incomplete-ingest: ${PANEL_SEARCH_RECOVER_INCOMPLETE_INGEST:true}
+    recover-index-on-start: ${PANEL_SEARCH_RECOVER_INDEX_ON_START:false}
+    require-dual-recall: ${PANEL_SEARCH_REQUIRE_DUAL_RECALL:false}
   knowledge:
     ingest:
-      two-phase: ${NOVA_KNOWLEDGE_INGEST_TWO_PHASE:true}
-      max-attempts: ${NOVA_KNOWLEDGE_INGEST_MAX_ATTEMPTS:5}
-      retry-base-seconds: ${NOVA_KNOWLEDGE_INGEST_RETRY_BASE_SECONDS:30}
-      lease-minutes: ${NOVA_KNOWLEDGE_INGEST_LEASE_MINUTES:5}
+      two-phase: ${PANEL_KNOWLEDGE_INGEST_TWO_PHASE:true}
+      max-attempts: ${PANEL_KNOWLEDGE_INGEST_MAX_ATTEMPTS:5}
+      retry-base-seconds: ${PANEL_KNOWLEDGE_INGEST_RETRY_BASE_SECONDS:30}
+      lease-minutes: ${PANEL_KNOWLEDGE_INGEST_LEASE_MINUTES:5}
       markdown-normalization:
-        enabled: ${NOVA_KNOWLEDGE_MD_NORMALIZATION:true}
+        enabled: ${PANEL_KNOWLEDGE_MD_NORMALIZATION:true}
+
+# ASR 这条链路的日志很少但极关键：协议事件、任务启动、上游错误都只有 DEBUG 级别。
+# 出问题时把 INFO 调成 DEBUG 就能看清"到底收没收到 task-started"。
+logging:
+  level:
+    com.panel.ai.infrastructure.bailian: DEBUG

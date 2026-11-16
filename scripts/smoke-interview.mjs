@@ -3,15 +3,15 @@
  * 端到端冒烟：登录 → 找一份已解析的简历 → 建面试 → 逐题回答 → 出报告。
  *
  *   node scripts/smoke-interview.mjs
- *   NOVA_BASE=http://127.0.0.1:8080 NOVA_USER=admin NOVA_PASS=123456 node scripts/smoke-interview.mjs
+ *   PANEL_BASE=http://127.0.0.1:8080 PANEL_USER=admin PANEL_PASS=123456 node scripts/smoke-interview.mjs
  *
  * 会真实调用大模型（一份 2 题 / 追问 1 次的面试约 1 分钟），用于发版前回归。
  */
-const BASE = process.env.NOVA_BASE || 'http://127.0.0.1:8080'
-const USER = process.env.NOVA_USER || 'admin'
-const PASS = process.env.NOVA_PASS || '123456'
-const QUESTIONS = Number(process.env.NOVA_QUESTIONS || 2)
-const FOLLOW_UPS = Number(process.env.NOVA_FOLLOW_UPS || 1)
+const BASE = process.env.PANEL_BASE || 'http://127.0.0.1:8080'
+const USER = process.env.PANEL_USER || 'admin'
+const PASS = process.env.PANEL_PASS || '123456'
+const QUESTIONS = Number(process.env.PANEL_QUESTIONS || 2)
+const FOLLOW_UPS = Number(process.env.PANEL_FOLLOW_UPS || 1)
 
 const ANSWER =
   '这块我在智能面试平台里做过：简历解析接多格式解析器，面试编排是 Planner 选题、Interviewer 出题、' +

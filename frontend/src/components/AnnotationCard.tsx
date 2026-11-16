@@ -1,9 +1,46 @@
 import type { Level, PointView } from '@/types/api'
 
-export const LEVEL_META: Record<Level, { label: string; badge: string; bar: string }> = {
-  STRONG: { label: '写得好', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'border-l-emerald-400' },
-  MEDIUM: { label: '一般', badge: 'bg-amber-50 text-amber-700 border-amber-200', bar: 'border-l-amber-400' },
-  WEAK: { label: '偏弱', badge: 'bg-rose-50 text-rose-700 border-rose-200', bar: 'border-l-rose-400' }
+export const LEVEL_META: Record<Level, { label: string; badge: string; bar: string; focus: string }> = {
+  STRONG: {
+    label: '写得好',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    bar: 'border-l-emerald-400',
+    focus: 'text-emerald-700 decoration-emerald-400'
+  },
+  MEDIUM: {
+    label: '一般',
+    badge: 'bg-amber-50 text-amber-700 border-amber-200',
+    bar: 'border-l-amber-400',
+    focus: 'text-amber-700 decoration-amber-400'
+  },
+  WEAK: {
+    label: '偏弱',
+    badge: 'bg-rose-50 text-rose-700 border-rose-200',
+    bar: 'border-l-rose-400',
+    focus: 'text-rose-700 decoration-rose-400'
+  }
+}
+
+/**
+ * 引文渲染：局部标注时把"被点名的那个说法"标出来，其余部分当上下文。
+ *
+ * <p>纸上只框这几个字（"双Topic"、"理解"），卡片里则给整句 + 加重的词，
+ * 这样既知道问题在哪，也不用回头看原来那句话。</p>
+ */
+function QuotedText({ text, term, tone }: { text: string; term: string | null; tone: string }) {
+  const index = term ? text.indexOf(term) : -1
+  if (!term || index < 0) {
+    return <>{text}</>
+  }
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark className={`bg-transparent font-medium underline decoration-2 underline-offset-2 ${tone}`}>
+        {term}
+      </mark>
+      {text.slice(index + term.length)}
+    </>
+  )
 }
 
 interface Props {
@@ -13,6 +50,15 @@ interface Props {
   /** 悬浮或聚焦时才展开全文 */
   active: boolean
   top: number
+  /**
+   * 原版视图里定位出来的整句原文。
+   *
+   * <p>模型给的 quote 只是 10-60 字的锚点，常常停在半个词上；后端把锚点扩到句读之后
+   * 会带回完整的整句，卡片显示它才能和纸上的高亮对得上。</p>
+   */
+  quote?: string
+  /** 局部标注框住的字：卡片里把它加粗标色，句子其余部分当上下文 */
+  focus?: string | null
   /** true：绝对定位贴合原文行（宽屏）；false：常规流式（窄屏） */
   layered?: boolean
   onHover: (id: string | null) => void
@@ -26,12 +72,16 @@ export function AnnotationCard({
   index,
   active,
   top,
+  quote,
+  focus,
   layered = true,
   onHover,
   register,
   onFocusPoint
 }: Props) {
   const meta = LEVEL_META[point.level]
+  const displayQuote = quote || point.quote
+  const highlightTerm = focus && displayQuote ? focus : null
   const expanded = active || !layered
   return (
     <article
@@ -66,8 +116,10 @@ export function AnnotationCard({
             <div className="space-y-2.5 pb-1.5 pl-5">
               <p className="text-[10px] uppercase tracking-wide text-slate-300">{moduleTitle}</p>
 
-              {point.quote && (
-                <p className="border-l-2 border-slate-200 pl-2 text-[11.5px] leading-5 text-slate-500">{point.quote}</p>
+              {displayQuote && (
+                <p className="border-l-2 border-slate-200 pl-2 text-[11.5px] leading-5 text-slate-500">
+                  <QuotedText text={displayQuote} term={highlightTerm} tone={meta.focus} />
+                </p>
               )}
 
               <p className="text-[12px] leading-[1.7] text-slate-700">{point.comment}</p>
@@ -101,7 +153,7 @@ export function AnnotationCard({
               )}
             </div>
           ) : (
-            <p className="mt-0.5 truncate pl-5 text-[11px] text-slate-400">{point.quote || point.comment}</p>
+            <p className="mt-0.5 truncate pl-5 text-[11px] text-slate-400">{displayQuote || point.comment}</p>
           )}
         </div>
       </div>

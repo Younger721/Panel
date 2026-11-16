@@ -1,0 +1,24 @@
+# read-only recon batch
+echo 'Hy040605' | sudo -S -p '' true 2>/dev/null; echo "sudo_rc=$?"
+echo "--- UPTIME / LOAD ---"; uptime
+echo "--- CPU / MEM ---"; nproc; free -m
+echo "--- DISK ---"; df -hT | grep -v tmpfs
+echo "--- BLOCK DEVICES ---"; lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT
+echo "--- LISTENING PORTS ---"; ss -tulpn 2>/dev/null
+echo "--- ESTABLISHED ---"; ss -tnp state established 2>/dev/null | head -20
+echo "--- RUNNING SERVICES ---"; systemctl list-units --type=service --state=running --no-pager --no-legend | awk '{print $1}'
+echo "--- FAILED SERVICES ---"; systemctl list-units --state=failed --no-pager --no-legend
+echo "--- ENABLED EXTRA SERVICES ---"; systemctl list-unit-files --state=enabled --no-pager --no-legend | awk '{print $1}' | grep -vE '^(ssh|getty|cron|rsyslog|systemd-|dbus|networkd|resolved|multipathd|uaa|unattended|e2scrub|apparmor|snapd|user@|open-vm|chrony|blk-avail|console-setup|keyboard-setup|setvtrgb|cloud-|lvm2|man-db|motd|plymouth|remote-fs|finalrd|grub|qemu|bluetooth|NetworkManager-wait)'
+echo "--- HOME ---"; ls -la ~; echo; du -sh ~/* 2>/dev/null | sort -h | tail -10
+echo "--- /opt /srv /var/www ---"; ls -la /opt /srv 2>/dev/null; ls -la /var/www 2>/dev/null
+echo "--- TOOLING ---"; for b in git python3 pip3 node npm nginx docker docker-compose java go gcc make curl wget vim tmux screen unzip htop; do printf "%-16s %s\n" "$b" "$(command -v $b || echo -)"; done
+echo "--- VERSIONS ---"; python3 -V 2>&1; node -v 2>&1; npm -v 2>&1; (nginx -v 2>&1); (docker --version 2>&1)
+echo "--- CRON ---"; crontab -l 2>&1 | head; echo 'Hy040605' | sudo -S -p '' ls /etc/cron.d 2>/dev/null
+echo "--- SSH CONFIG (effective key lines) ---"; grep -riE '^\s*(Port|PasswordAuthentication|PermitRootLogin|PubkeyAuthentication|AllowUsers)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null
+echo "--- USERS ---"; awk -F: '$3>=1000 && $3<65534 {print $1, $3, $6, $7}' /etc/passwd; echo "--- LOGINS ---"; w; last -n 8 2>/dev/null
+echo "--- AUTH LOG TAIL ---"; echo 'Hy040605' | sudo -S -p '' tail -n 12 /var/log/auth.log 2>/dev/null
+echo "--- FIREWALL ---"; echo 'Hy040605' | sudo -S -p '' ufw status verbose 2>/dev/null; echo 'Hy040605' | sudo -S -p '' iptables -S 2>/dev/null | head -25
+echo "--- APT STATE ---"; echo 'Hy040605' | sudo -S -p '' apt-get -s upgrade 2>/dev/null | tail -3
+echo "--- DOCKER ---"; echo 'Hy040605' | sudo -S -p '' docker ps -a 2>/dev/null || echo "no docker daemon"
+echo "--- CLOUD INIT ---"; cloud-init status 2>/dev/null; echo 'Hy040605' | sudo -S -p '' tail -5 /var/log/cloud-init-output.log 2>/dev/null
+echo "--- RECENT MODIFIED IN HOME ---"; find ~ -maxdepth 3 -type f -newermt '-3 days' 2>/dev/null | head -20

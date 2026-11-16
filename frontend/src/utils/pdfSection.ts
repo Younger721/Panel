@@ -11,8 +11,13 @@ export interface Paragraph {
   text: string
   /** 段落内部按字体切开的段（中文楷体 + 数字 Arial 这种） */
   runs: ParagraphRun[]
-  /** 页面单位（≈ PDF 点）的字号 */
+  /** 页面单位（≈ PDF 点）的 em 字高：CSS font-size 必须用它，字才和纸上一样高 */
   size: number
+  /**
+   * 全角字宽对应的字号。简历 PDF 常用水平缩放（Tz）压窄字面，
+   * 这时字宽字号 < em 字号，比值就是要补回去的 scaleX。
+   */
+  fontSize: number
   /** PDF 里的字体名（已去掉子集前缀），未知时为空 */
   font: string | null
   /** PDF 里的原样字体名，用来找嵌入字体 */
@@ -20,6 +25,10 @@ export interface Paragraph {
   bold: boolean
   /** 页面单位的行距（按原件量出来的基线间距） */
   lineHeight: number
+  /** 这一段落在第几页 */
+  page: number
+  /** 这一段在纸上的矩形（PDF 点）：把改后的文字铺回原位时按它摆 */
+  box: { x: number; y: number; width: number; height: number }
 }
 
 /** 段落里一段同字体的文字。 */
@@ -115,11 +124,14 @@ export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] 
   const drafts: {
     runs: ParagraphRun[]
     size: number
+    fontSize: number
     /** 这一段的"主字体"：段落基准样式用它，其余字体用 span 覆盖 */
     font: string | null
     fontKey: string | null
     bold: boolean
     ys: number[]
+    page: number
+    box: { x: number; y: number; width: number; height: number }
   }[] = []
   let previous: TextLine | null = null
 
@@ -131,13 +143,16 @@ export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] 
     const primary = runs[0] ?? { text: '', font: null, fontKey: null, bold: false }
     drafts.push({
       runs,
-      // 用渲染出来的字号（后端按全角字宽量的），不是 PDF 里写的 Tf 值：
-      // 有的简历 PDF 带文字矩阵缩放，两个数能差三成
-      size: line.fontSize || line.size,
+      // 两个字号各管一件事：size 是 em 字高（CSS font-size 用它），
+      // fontSize 是按全角字宽量出来的字号，两者之比就是 PDF 的水平缩放。
+      size: line.size || line.fontSize || 12,
+      fontSize: line.fontSize || line.size || 12,
       font: line.font ?? primary.font,
       fontKey: line.fontKey ?? primary.fontKey,
       bold: line.bold ?? primary.bold,
-      ys: [line.y]
+      ys: [line.y],
+      page: line.page,
+      box: { x: line.x, y: line.y, width: line.width, height: line.height }
     })
   }
 
@@ -171,6 +186,12 @@ export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] 
     if (wrapped && last) {
       appendRuns(last.runs, runsOf(line))
       last.ys.push(line.y)
+      // 折行的续行：把这一段的矩形往下撑
+      const left = Math.min(last.box.x, line.x)
+      const top = Math.min(last.box.y, line.y)
+      const right = Math.max(last.box.x + last.box.width, line.x + line.width)
+      const bottom = Math.max(last.box.y + last.box.height, line.y + line.height)
+      last.box = { x: left, y: top, width: right - left, height: bottom - top }
     } else {
       push(line)
     }
@@ -187,34 +208,45 @@ export function toParagraphs(lines: TextLine[], pageRight: number): Paragraph[] 
       text: draft.runs.map(run => run.text).join(''),
       runs: draft.runs,
       size,
+      fontSize: draft.fontSize,
       font: draft.font,
       fontKey: draft.fontKey,
       bold: draft.bold,
-      lineHeight
+      lineHeight,
+      page: draft.page,
+      box: draft.box
     }
   })
 }
 
+/** 版面字号（em 字高）：行距、行框都按它算，不能用字宽字号。 */
+function sizeOf(line: TextLine): number {
+  return line.size || line.fontSize || 12
+}
+
 /** 一行拆成"同字体的几段"；后端没给 runs 时整行算一段。 */
 function runsOf(line: TextLine): ParagraphRun[] {
+  // 只收掉换行/制表符；全角空格（U+3000）和连续空格是对齐的一部分，必须原样留着，
+  // 否则"姓　　名"重绘成"姓 名"，整行宽度就短了一截。
+  const tidy = (value: string) => value.replace(/[\r\n\t\f\v]+/g, ' ')
   const runs = line.runs && line.runs.length > 0
     ? line.runs.map(run => ({
-        text: run.text.replace(/\s+/g, ' '),
+        text: tidy(run.text),
         font: run.font ?? null,
         fontKey: run.fontKey ?? null,
         bold: run.bold ?? false
       }))
     : [{
-        text: line.text.replace(/\s+/g, ' '),
+        text: tidy(line.text),
         font: line.font ?? null,
         fontKey: line.fontKey ?? null,
         bold: line.bold ?? false
       }]
   const merged = runs.filter(run => run.text.length > 0)
   if (merged.length > 0) {
-    merged[0] = { ...merged[0], text: merged[0].text.replace(/^\s+/, '') }
+    merged[0] = { ...merged[0], text: merged[0].text.replace(/^[ \t\r\n]+/, '') }
     const last = merged[merged.length - 1]
-    merged[merged.length - 1] = { ...last, text: last.text.replace(/\s+$/, '') }
+    merged[merged.length - 1] = { ...last, text: last.text.replace(/[ \t\r\n]+$/, '') }
   }
   return merged
 }
@@ -253,10 +285,6 @@ function medianPitch(lines: TextLine[]): number {
   return diffs[Math.floor(diffs.length / 2)]
 }
 
-function sizeOf(line: TextLine): number {
-  return line.fontSize || line.size
-}
-
 /** 一个段落内部（折行折出来的几行）的间距。 */
 function pitchOf(ys: number[]): number {
   if (ys.length < 2) {
@@ -273,6 +301,30 @@ function escapeHtml(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+    // 简历里的字段名讲究对齐："姓　　名"中间是两个全角空格（U+3000，浏览器不折叠，
+    // 宽度就是 1em，原样留着）；半角连续空格会被 HTML 折成一个，重绘出来字距变窄，
+    // 所以逐个换成 &nbsp;。
+    .replace(/ /g, '&nbsp;')
+}
+
+/**
+ * 这一段的横向压缩比：PDF 用 Tz（水平缩放）把字压窄时，字宽字号 < em 字号。
+ *
+ * 画布上铺回原文时用它做 `scaleX`：字号按 em 给，宽度再压回原稿的宽度——
+ * 只给字号（旧做法）会让字又小又胖，一眼就看得出是贴上去的。
+ */
+export function squeezeOf(paragraph: Paragraph): number {
+  const em = paragraph.size
+  const wide = paragraph.fontSize
+  if (!em || !wide || em <= 0) {
+    return 1
+  }
+  return Math.min(1.4, Math.max(0.6, wide / em))
+}
+
+/** 一个段落的行盒高度（PDF 里的上缘 0.92em + 下缘 0.20em）。 */
+export function lineBoxOf(paragraph: Paragraph): number {
+  return paragraph.size * 1.12
 }
 
 /**
@@ -299,7 +351,11 @@ export function toSeedHtml(
         `font-size:${Math.round(size * 10) / 10}px`,
         `line-height:${Math.round(paragraph.lineHeight * scale * 10) / 10}px`,
         `margin:0 0 ${Math.round(paragraph.size * 0.2 * scale * 10) / 10}px 0`,
-        `font-weight:${baseWeight}`
+        `font-weight:${baseWeight}`,
+        // 嵌入字体只有常规字面，别让浏览器合成粗体把字形描胖
+        'font-synthesis:none',
+        'letter-spacing:0',
+        'font-kerning:none'
       ].join(';')
       const inner = paragraph.runs
         .map(run => {

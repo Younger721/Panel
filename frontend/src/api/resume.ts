@@ -1,4 +1,4 @@
-import apiClient, { requestBlob } from './client'
+import apiClient, { requestBlob, requestText } from './client'
 import type {
   AnalysisView,
   HighlightView,
@@ -58,13 +58,54 @@ export const resumeApi = {
   /**
    * 编辑器保存：正文写回成新的原文并重新排队解析（202，状态回到 PENDING）。
    * edits 只给 PDF 原位编辑用——行索引 → 新文本，用来还原编辑器里的显形文字。
+   *
+   * format=markdown 表示这次改的是 Markdown 内容稿：后端只挪 md 指针，
+   * PDF 原版、原位改动和「导出改后的 PDF」都保持可用。
    */
-  saveContent(id: number, text: string, html?: string, edits?: Record<string, string>): Promise<ResumeView> {
-    return apiClient.put<unknown, ResumeView>(`/v1/interview/resumes/${id}/content`, { text, html, edits })
+  saveContent(
+    id: number,
+    text: string,
+    html?: string,
+    edits?: Record<string, string>,
+    format?: 'text' | 'markdown'
+  ): Promise<ResumeView> {
+    return apiClient.put<unknown, ResumeView>(`/v1/interview/resumes/${id}/content`, { text, html, edits, format })
+  },
+
+  /**
+   * Markdown 内容稿的原文；null 表示这份简历还没用 md 改过。
+   *
+   * <p>编辑器打开时优先用它，而不是解析后重新渲染的 md——渲染会规范化列表前缀、
+   * 洗掉行内强调，用户会以为自己写的东西被系统改了。</p>
+   */
+  markdownSource(id: number): Promise<string | null> {
+    return requestText(`/v1/interview/resumes/${id}/content/markdown`)
   },
 
   /** 原文不变，只重跑解析与批注。 */
-  reanalyze(id: number): Promise<ResumeView> {
-    return apiClient.post<unknown, ResumeView>(`/v1/interview/resumes/${id}/analyze`)
+  reanalyze(id: number): Promise<ResumeView> {    return apiClient.post<unknown, ResumeView>(`/v1/interview/resumes/${id}/analyze`)
+  },
+
+  /**
+   * 解卡：把长期停在解析中/分析中、或已经 FAILED 的简历退回排队并重投任务。
+   *
+   * <p>和 {@link reanalyze} 的区别是后者会被"正在解析"挡成 409 ——
+   * 任务被异常中断、状态卡死时只有这个能救。</p>
+   */
+  reset(id: number): Promise<ResumeView> {
+    return apiClient.post<unknown, ResumeView>(`/v1/interview/resumes/${id}/reset`)
+  },
+
+  /**
+   * 软删除：后端只写删除时间戳，行、原文、画像、批注都留着。
+   * 返回体带 deletedAt，撤销提示用它确认删的是哪一条。
+   */
+  remove(id: number): Promise<ResumeView> {
+    return apiClient.delete<unknown, ResumeView>(`/v1/interview/resumes/${id}`)
+  },
+
+  /** 撤销软删除，记录原样回到列表。 */
+  restore(id: number): Promise<ResumeView> {
+    return apiClient.post<unknown, ResumeView>(`/v1/interview/resumes/${id}/restore`)
   }
 }

@@ -139,4 +139,290 @@ body {
   .scrollbar-thin::-webkit-scrollbar-thumb {
     @apply rounded bg-slate-300 hover:bg-slate-400;
   }
+
+  /* ---------- 面试舞台：数字人微动 ---------- */
+  /* 只是"不是一张死图"的程度：0.6% 的呼吸，肉眼几乎看不出位移。
+     之前是 3%~5%，整个人像在呼吸机上，观感是"一直在动"。
+     人物表情是静态的，不再有说话时的另一套动效。 */
+  .interviewer-breath {
+    animation: interviewer-breath 9s ease-in-out infinite;
+    transform-origin: 50% 100%;
+  }
 }
+
+/* ---------- 登录页：左侧品牌舞台 ---------- */
+/* 深色底 + 极光光斑 + 网格 + 颗粒，靠层次而不是靠大色块取胜 */
+.auth-hero {
+  isolation: isolate;
+  background:
+    radial-gradient(120% 100% at 0% 0%, #1a1442 0%, transparent 58%),
+    radial-gradient(90% 90% at 100% 100%, #0f1030 0%, transparent 62%),
+    #06060f;
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.auth-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(72px);
+  opacity: 0.52;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.auth-blob-a {
+  width: 44rem;
+  height: 44rem;
+  left: -15rem;
+  top: -19rem;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.85), transparent 62%);
+  animation: auth-drift-a 26s ease-in-out infinite;
+}
+
+.auth-blob-b {
+  width: 40rem;
+  height: 40rem;
+  right: -12rem;
+  top: 4rem;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.72), transparent 64%);
+  opacity: 0.6;
+  animation: auth-drift-b 33s ease-in-out infinite;
+}
+
+.auth-blob-c {
+  width: 32rem;
+  height: 32rem;
+  left: 6rem;
+  bottom: -19rem;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.42), transparent 62%);
+  animation: auth-drift-c 24s ease-in-out infinite;
+}
+
+/* 右中腹的一团冷光：宽屏时右侧不至于空成一块黑 */
+.auth-blob-d {
+  width: 30rem;
+  height: 30rem;
+  right: -8rem;
+  bottom: 4rem;
+  opacity: 0.34;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.5), transparent 64%);
+  animation: auth-drift-c 29s ease-in-out infinite reverse;
+}
+
+/* 移动端头部更矮：光斑按比例收小 */
+.auth-blob-mobile.auth-blob-a {
+  width: 24rem;
+  height: 24rem;
+  left: -8rem;
+  top: -12rem;
+}
+
+.auth-blob-mobile.auth-blob-b {
+  width: 20rem;
+  height: 20rem;
+  right: -8rem;
+  top: -5rem;
+}
+
+.auth-hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 76px 76px;
+  -webkit-mask-image: radial-gradient(115% 85% at 18% 12%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(115% 85% at 18% 12%, #000 0%, transparent 72%);
+}
+
+.auth-noise {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  opacity: 0.22;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+/* 跟随鼠标的柔光，让大面积深色不显得"死" */
+.auth-spot {
+  background: radial-gradient(
+    460px circle at var(--mx, 32%) var(--my, 24%),
+    rgba(141, 148, 255, 0.16),
+    transparent 62%
+  );
+  pointer-events: none;
+}
+
+/* 左侧点阵地形画布：只做背景，不吃鼠标事件；边缘羽化，避免画布边界生硬 */
+.auth-terrain {
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(82% 80% at 50% 56%, #000 56%, transparent 100%);
+  mask-image: radial-gradient(82% 80% at 50% 56%, #000 56%, transparent 100%);
+}
+
+/* 右侧表单区的极淡光晕，与左舞台呼应但不抢焦点 */
+.auth-form-glow {
+  background:
+    radial-gradient(60% 45% at 100% 0%, rgba(99, 102, 241, 0.09), transparent 70%),
+    radial-gradient(50% 40% at 0% 100%, rgba(139, 92, 246, 0.06), transparent 70%);
+  pointer-events: none;
+}
+
+@keyframes auth-drift-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(4%, 6%, 0) scale(1.12);
+  }
+}
+
+@keyframes auth-drift-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(-5%, 7%, 0) scale(0.94);
+  }
+}
+
+@keyframes auth-drift-c {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(0.96);
+  }
+  50% {
+    transform: translate3d(5%, -5%, 0) scale(1.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-blob,
+  .auth-blob-a,
+  .auth-blob-b,
+  .auth-blob-c,
+  .animate-auth-float,
+  .animate-auth-float-loose,
+  .animate-sweep {
+    animation: none !important;
+  }
+}
+
+@keyframes interviewer-breath {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.006);
+  }
+}
+
+
+
+/* ---------- 知识库检索：思考链路 ---------- */
+/* 顶部进度条里一段来回扫的亮带：表示"还在检索"，不伪造百分比 */
+@keyframes chain-flow {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(420%);
+  }
+}
+
+.chain-flow {
+  animation: chain-flow 1.5s ease-in-out infinite;
+}
+
+/* 正在执行的那一段：向外扩散的光环，比转圈更轻 */
+@keyframes chain-node-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.32);
+  }
+  55% {
+    box-shadow: 0 0 0 7px rgba(99, 102, 241, 0);
+  }
+}
+
+.chain-node-running {
+  animation: chain-node-glow 1.6s ease-in-out infinite;
+}
+
+/* 结果卡片依次浮出：首屏不要"啪"地全出现 */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise-in {
+  animation: rise-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chain-flow,
+  .chain-node-running,
+  .rise-in {
+    animation: none !important;
+  }
+}
+
+/* ---------- 问答助手：思考链路画布 ---------- */
+.chat-graph-bg {
+  background-image: radial-gradient(circle, #dbe3f0 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+@keyframes chat-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.2);
+  }
+  55% {
+    box-shadow: 0 0 0 7px rgba(99, 102, 241, 0);
+  }
+}
+
+.chat-node-running {
+  animation: chat-node-pulse 1.8s ease-out infinite;
+}
+
+@keyframes chat-typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.chat-typing span {
+  animation: chat-typing 1.1s infinite;
+}
+
+.chat-typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-node-running,
+  .chat-typing span {
+    animation: none !important;
+  }
+}
+
+

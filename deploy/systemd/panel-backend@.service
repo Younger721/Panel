@@ -1,0 +1,41 @@
+[Unit]
+Description=Panel backend (%i)
+Documentation=file:///opt/panel/README.md
+After=network-online.target mysql.service redis-server.service
+Wants=network-online.target
+# 单实例失败不影响另一个颜色
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=panel
+Group=panel
+WorkingDirectory=/opt/panel
+# 公共配置 + 各颜色自己的端口
+EnvironmentFile=/etc/panel/panel.env
+EnvironmentFile=/etc/panel/%i.env
+# 每个颜色在自己的 env 里指定 SERVER_PORT 与 PANEL_JAR，
+# 这样蓝绿两个实例可以指向不同 release 目录，互不影响。
+Environment=JAVA_TOOL_OPTIONS=-Duser.timezone=Asia/Shanghai -XX:+ExitOnOutOfMemoryError
+ExecStart=/usr/bin/java \
+  -Xms768m -Xmx1280m -XX:MaxMetaspaceSize=320m \
+  -XX:+UseG1GC -XX:MaxGCPauseMillis=200 \
+  -jar ${PANEL_JAR}
+# 优雅停机：让进行中的请求与 SSE 收尾，再被 SIGKILL 兜底
+TimeoutStopSec=45
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+# 资源护栏：防止 JVM 之外的泄漏把机器拖死
+MemoryMax=1800M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/panel
+
+StandardOutput=append:/opt/panel/logs/%i.log
+StandardError=append:/opt/panel/logs/%i.log
+
+[Install]
+WantedBy=multi-user.target

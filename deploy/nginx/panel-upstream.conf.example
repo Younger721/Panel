@@ -1,0 +1,2 @@
+# 由 deploy/scripts/switch-upstream.sh 生成/覆盖，不要手改
+server 127.0.0.1:8080 max_fails=2 fail_timeout=10s;

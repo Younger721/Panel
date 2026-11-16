@@ -9,6 +9,7 @@ const STATUS_LABEL: Record<InterviewSessionSummary['status'], { text: string; cl
   PLANNED: { text: '待开始', className: 'bg-slate-100 text-slate-500' },
   IN_PROGRESS: { text: '进行中', className: 'bg-amber-50 text-amber-600' },
   COMPLETED: { text: '已完成', className: 'bg-emerald-50 text-emerald-600' },
+  ABANDONED: { text: '已结束', className: 'bg-slate-100 text-slate-500' },
   FAILED: { text: '异常', className: 'bg-rose-50 text-rose-600' }
 }
 

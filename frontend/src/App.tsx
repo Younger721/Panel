@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useEffect } from 'react'
 import { getToken, setToken } from '@/api/client'
+import { setActor } from '@/auth/actor'
 import AppLayout from '@/components/AppLayout'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import LoginPage from '@/pages/LoginPage'
@@ -12,6 +13,12 @@ import InterviewPage from '@/pages/InterviewPage'
 import ReportPage from '@/pages/ReportPage'
 import HistoryPage from '@/pages/HistoryPage'
 import ResumeEditorPage from '@/pages/ResumeEditorPage'
+import KnowledgeBaseListPage from '@/pages/KnowledgeBaseListPage'
+import KnowledgeBaseDetailPage from '@/pages/KnowledgeBaseDetailPage'
+import KbChatPage from '@/pages/KbChatPage'
+import KbCatalogPage from '@/pages/KbCatalogPage'
+import KbQuestionBankPage from '@/pages/KbQuestionBankPage'
+import KbQuizPage from '@/pages/KbQuizPage'
 
 function Guard({ children }: { children: React.ReactNode }) {
   const location = useLocation()
@@ -37,12 +44,24 @@ function DevLogin() {
   const navigate = useNavigate()
   const token = params.get('token')
   const next = params.get('next') || '/'
+  const actor = params.get('actor')
   useEffect(() => {
     if (token) {
       setToken(token)
+      if (actor === 'admin') {
+        setActor({
+          userId: 0,
+          tenantId: null,
+          username: 'admin',
+          displayName: '管理员',
+          email: null,
+          roles: ['PLATFORM_ADMIN'],
+          permissions: []
+        })
+      }
     }
     navigate(next, { replace: true })
-  }, [token, next, navigate])
+  }, [token, next, navigate, actor])
   return null
 }
 
@@ -114,6 +133,70 @@ export default function App() {
         element={
           <Shell>
             <HistoryPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb"
+        element={
+          <Shell>
+            <KnowledgeBaseListPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb/chat"
+        element={
+          <Shell>
+            <KbChatPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb/questions"
+        element={
+          <Shell>
+            <KbQuestionBankPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb/quiz"
+        element={
+          <Shell>
+            <KbQuizPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb/:id/catalog"
+        element={
+          <Shell>
+            <KbCatalogPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb/:id/quiz"
+        element={
+          <Shell>
+            <KbQuizPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb/:id/chat"
+        element={
+          <Shell>
+            <KbChatPage />
+          </Shell>
+        }
+      />
+      <Route
+        path="/kb/:id"
+        element={
+          <Shell>
+            <KnowledgeBaseDetailPage />
           </Shell>
         }
       />

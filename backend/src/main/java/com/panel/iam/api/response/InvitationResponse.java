@@ -1,0 +1,13 @@
+package com.panel.iam.api.response;
+
+import com.panel.iam.application.UserInvitationService;
+import com.panel.iam.domain.model.RoleCode;
+
+import java.time.Instant;
+
+public record InvitationResponse(String rawToken, Long tenantId, String email,
+                                 RoleCode role, Instant expiresAt) {
+    public static InvitationResponse from(UserInvitationService.InvitationIssued issued) {
+        return new InvitationResponse(issued.rawToken(), issued.tenantId(), issued.email(), issued.role(), issued.expiresAt());
+    }
+}

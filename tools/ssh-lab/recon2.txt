@@ -1,0 +1,19 @@
+# read-only recon pass 2
+echo "--- AUTHORIZED KEYS ---"; cat ~/.ssh/authorized_keys 2>/dev/null | sed 's/\(AAAAAAAA[A-Za-z0-9+/]\{12\}\)[A-Za-z0-9+/=]*/\1...<truncated>/'; ls -la ~/.ssh
+echo "--- BASH HISTORY ---"; cat ~/.bash_history 2>/dev/null | head -20
+echo "--- CPU MODEL ---"; lscpu | grep -E 'Model name|^CPU\(s\)|Hypervisor|Virtualization'
+echo "--- APT COUNTS ---"; dpkg -l | grep -c '^ii'; echo 'Hy040605' | sudo -S -p '' apt-get -s upgrade 2>/dev/null | grep -c '^Inst'
+echo "--- TENCENT AGENTS ---"; for s in tat_agent yunjing sgagent barmorikg; do printf "%-12s " "$s"; systemctl is-active $s 2>/dev/null || true; done; ls -la /usr/local/qcloud 2>/dev/null | head
+echo "--- YJ FIREWALL RULES ---"; echo 'Hy040605' | sudo -S -p '' iptables -S YJ-FIREWALL-INPUT 2>/dev/null
+echo "--- LISTEN ON PUBLIC IF ---"; ss -tuln | grep -v '127.0.0' 
+echo "--- EGRESS TEST ---"; curl -s -m 8 -o /dev/null -w "baidu:%{http_code} " https://www.baidu.com; curl -s -m 8 -o /dev/null -w "pypi:%{http_code} " https://pypi.org/simple/; echo
+echo "--- DNS ---"; resolvectl status 2>/dev/null | grep -E 'DNS Servers|Current DNS' | head -4
+echo "--- TIMEZONE ---"; timedatectl 2>/dev/null | head -6
+echo "--- KERNEL PARAMS (sec) ---"; sysctl net.ipv4.ip_forward net.ipv4.tcp_syncookies kernel.randomize_va_space 2>/dev/null
+echo "--- DOCKER/LXD PRESENT ---"; ls /var/lib/lxd 2>/dev/null | head -3; snap list 2>/dev/null | head
+echo "--- TMP ---"; ls -la /tmp | head -10
+echo "--- ROOT HOME (count only) ---"; echo 'Hy040605' | sudo -S -p '' ls -a /root 2>/dev/null | head -15
+echo "--- PLUS: who else logged ---"; echo 'Hy040605' | sudo -S -p '' last -a -n 12 2>/dev/null
+echo "--- SSH HARDENING STATE ---"; echo 'Hy040605' | sudo -S -p '' grep -riE '^(PasswordAuthentication|PermitRootLogin|KbdInteractive|UsePAM|MaxAuthTries|ClientAlive)' /etc/ssh/sshd_config.d/ /etc/ssh/sshd_config 2>/dev/null
+echo "--- FAIL2BAN? ---"; systemctl is-active fail2ban 2>/dev/null || echo absent
+echo "--- LISTEN PROCESS MAP ---"; echo 'Hy040605' | sudo -S -p '' ss -tulpn 2>/dev/null | grep -E ':22|:53'

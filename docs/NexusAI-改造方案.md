@@ -1,6 +1,6 @@
 # NexusAI 改造方案：从「AI 底座」到「智能面试与职业评估平台」
 
-> 基线：Nova AI（422 个 Java 源文件，`clean compile` BUILD SUCCESS，JDK 17 / Spring Boot 3.4.12）
+> 基线：Panel（422 个 Java 源文件，`clean compile` BUILD SUCCESS，JDK 17 / Spring Boot 3.4.12）
 > 目标：简历中描述的 NexusAI —— 多 Agent 协作 + 简历解析 + 岗位匹配 + 模拟面试 + 评估复核 + 混合 RAG + 异步任务 + SSE
 > 原则：**新增业务上下文，复用 AI 内核**。不改造成本高的部分不动，靠端口/接口扩展。
 
@@ -79,7 +79,7 @@
 ```
 
 要点（面试常追问，必须真的这么做）：**Kafka 用 at-least-once + 业务侧幂等键（job id）**，状态以 DB 为准，Kafka 只做「新任务唤醒」，不做唯一真相。这样重复消费不会重复扣费/重复生成报告。
-配套：`docker-compose.yml` 加 `kafka`（KRaft 单节点即可）+ `application-dev.yml` 加 `nova.job-queue=kafka` 开关 + `.env.example` 加端口。
+配套：`docker-compose.yml` 加 `kafka`（KRaft 单节点即可）+ `application-dev.yml` 加 `panel.job-queue=kafka` 开关 + `.env.example` 加端口。
 
 > 📄 详细设计（类结构、topic、故障演练、验收）见 [Kafka 开发计划](./Kafka开发计划.md)。compose 服务与 `.env.example` 变量已就位，等实现与联调。
 
@@ -98,10 +98,10 @@
 
 ---
 
-## 3. 目标结构（新增 `com.nova.interview` 业务上下文）
+## 3. 目标结构（新增 `com.panel.interview` 业务上下文）
 
 ```
-backend/src/main/java/com/nova/interview/
+backend/src/main/java/com/panel/interview/
 ├── api/
 │   ├── ResumeController.java            POST /api/v1/resumes          上传
 │   │                                    GET  /api/v1/resumes/{id}     解析结果
@@ -298,7 +298,7 @@ CREATE TABLE interview_report (
 
 | 项 | 内容 |
 |---|---|
-| 新增包 | `com.nova.interview`（`api` / `application` / `domain` / `infrastructure`） |
+| 新增包 | `com.panel.interview`（`api` / `application` / `domain` / `infrastructure`） |
 | 表 | `resume`、`resume_profile`（JPA 自动建表，**均无 `tenant_id`**） |
 | 接口 | `POST /api/v1/interview/resumes`（202）、`GET /api/v1/interview/resumes`、`GET /{id}`、`GET /{id}/profile` |
 | 异步 | `RESUME_PARSE:<id>` 入队 → Kafka 唤醒 → `AsyncJobDispatcher` 按类型路由 → `ResumeParseWorker` |

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="color-scheme" content="light" />
-<title>Nova 简历编辑器</title>
+<title>Panel 简历编辑器</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%234f46e5'/%3E%3Cpath d='M16 7l2.4 6.6L25 16l-6.6 2.4L16 25l-2.4-6.6L7 16l6.6-2.4L16 7Z' fill='%23fff'/%3E%3C/svg%3E" />
 
 <!-- ============ 简历纸张样式（导出 HTML 时原样带走） ============ -->
@@ -939,7 +939,7 @@ input[type="color"] {
   .paper [data-role][contenteditable="true"]:empty::after { content: none !important; }
 }
 
-/* ---------- 嵌入 Nova 工作台（?embed=1）----------
+/* ---------- 嵌入 Panel 工作台（?embed=1）----------
    挂进侧栏后左边已经有品牌与导航，这里去掉重复的 brand，顶栏压扁到 52px。 */
 .embed .topbar {
   height: 52px;
@@ -998,10 +998,10 @@ input[type="color"] {
 
 <div class="app">
   <header class="topbar">
-    <a class="brand" href="/" title="返回 Nova AI 工作台">
+    <a class="brand" href="/" title="返回 Panel 工作台">
       <div class="brand-mark"><svg class="icon"><use href="#i-sparkle"></use></svg></div>
       <div class="brand-text">
-        <span class="brand-name">Nova AI</span>
+        <span class="brand-name">Panel</span>
         <span class="brand-sub">简历编辑器 · 所见即所得</span>
       </div>
     </a>
@@ -1286,7 +1286,7 @@ input[type="color"] {
   /* ================================================================
    * 数据与常量
    * ================================================================ */
-  var STORAGE_KEY = 'nova-resume-editor:v1';
+  var STORAGE_KEY = 'panel-resume-editor:v1';
   // 从简历库打开时按简历分键保存，避免覆盖编辑器自己的草稿
   var activeKey = STORAGE_KEY;
   var MAX_HISTORY = 60;
@@ -1449,7 +1449,7 @@ input[type="color"] {
     '  <div class="section-body">',
     '    <div class="entry">',
     '      <div class="entry-head">',
-    '        <div class="entry-title" data-role="entry-title">Nova 简历编辑器 · 个人项目</div>',
+    '        <div class="entry-title" data-role="entry-title">Panel 简历编辑器 · 个人项目</div>',
     '        <div class="entry-meta" data-role="entry-meta">2024.05 – 2024.08</div>',
     '      </div>',
     '      <p class="entry-sub" data-role="entry-sub">技术栈：原生 HTML / CSS / JavaScript</p>',
@@ -1711,7 +1711,7 @@ input[type="color"] {
 
   function buildState() {
     return {
-      app: 'nova-resume-editor',
+      app: 'panel-resume-editor',
       version: 1,
       savedAt: new Date().toISOString(),
       global: JSON.parse(JSON.stringify(styleState)),
@@ -2032,7 +2032,7 @@ input[type="color"] {
   }
 
   function updateDocTitle() {
-    document.title = resumeName() + ' · Nova 简历编辑器';
+    document.title = resumeName() + ' · Panel 简历编辑器';
   }
 
   /* ================================================================
@@ -2849,7 +2849,7 @@ input[type="color"] {
     window.addEventListener('message', function (event) {
       if (event.origin !== origin) { return; }
       var data = event.data || {};
-      if (data.type !== 'nova:editor:load' || !data.document || typeof data.document.html !== 'string') { return; }
+      if (data.type !== 'panel:editor:load' || !data.document || typeof data.document.html !== 'string') { return; }
       if (typeof data.storageKey === 'string' && data.storageKey) { activeKey = data.storageKey; }
       if (!data.document.html) { toast('这份简历没有解析出正文，请重新上传'); return; }
       applyDocument(data.document, { resetHistory: true });
@@ -2861,10 +2861,10 @@ input[type="color"] {
     window.addEventListener('message', function (event) {
       if (event.origin !== origin) { return; }
       var data = event.data || {};
-      if (data.type !== 'nova:editor:request-document') { return; }
+      if (data.type !== 'panel:editor:request-document') { return; }
       try {
         window.parent.postMessage({
-          type: 'nova:editor:document',
+          type: 'panel:editor:document',
           requestId: data.requestId || '',
           html: cleanHTML(),
           text: resumePlainText(),
@@ -2872,7 +2872,7 @@ input[type="color"] {
         }, origin);
       } catch (err) { /* ignore */ }
     });
-    try { window.parent.postMessage({ type: 'nova:editor:ready' }, origin); } catch (err) { /* ignore */ }
+    try { window.parent.postMessage({ type: 'panel:editor:ready' }, origin); } catch (err) { /* ignore */ }
   }
 
   /* ================================================================
@@ -2911,8 +2911,8 @@ input[type="color"] {
     }
   });
 
-  /* 供宿主页面调用：NovaResumeEditor.load({html, global}) */
-  window.NovaResumeEditor = {
+  /* 供宿主页面调用：PanelResumeEditor.load({html, global}) */
+  window.PanelResumeEditor = {
     getState: function () { return buildState(); },
     load: function (data) {
       if (typeof data === 'string') { data = { html: data }; }

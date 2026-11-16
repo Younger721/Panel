@@ -15,6 +15,8 @@ export interface ResumeView {
   status: ResumeStatus
   lastError: string | null
   createdAt: string
+  /** 软删除时间戳；null = 还在库里。列表只会返回未删除的记录。 */
+  deletedAt: string | null
   hasProfile: boolean
   yearsOfExperience: number | null
   skillCount: number | null
@@ -37,6 +39,8 @@ export interface PointView {
   comment: string
   improvements: string[]
   questions: string[]
+  /** 只在"某个说法不专业"的批注里出现：页面上只框这几个字，quote 那句作上下文 */
+  focus?: string | null
 }
 
 export interface ModuleView {
@@ -165,18 +169,25 @@ export interface HighlightRect {
 export interface HighlightView {
   page: number
   rects: HighlightRect[]
+  /** 高亮所在的那一整句原文：批注卡拿它当上下文 */
+  text?: string
+  /** 局部标注框住的那几个字；整句高亮时为空 */
+  focus?: string | null
 }
 
 export interface QuoteRequest {
   pointId: string
   quote: string
   fallback: string | null
+  /** 给了就只框这几个字（局部标注） */
+  focus?: string | null
 }
 
 export interface InterviewSessionView {
   id: number
   resumeId: number
-  status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED'
+  /** ABANDONED = 用户主动结束或超时收尾；已结算，不能再作答，也签不出语音券。 */
+  status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' | 'FAILED'
   turnBudget: number
   questionCount: number
   followUpLimit: number
@@ -214,6 +225,29 @@ export interface TurnEvaluation {
   deductions?: string[] | null
   feedback?: string | null
   answered?: boolean | null
+  /** 评委团：技术评委 / 表达评委各自的独立打分。老数据没有这个字段。 */
+  judges?: TurnJudge[] | null
+}
+
+export interface TurnJudge {
+  name: string
+  scores?: TurnScores | null
+  feedback?: string | null
+  evidence?: TurnEvidence[] | null
+}
+
+export interface TurnReviewAdjustment {
+  axis: string
+  from: number
+  to: number
+  why: string
+}
+
+/** Reviewer 的仲裁结果；只在"评分与证据矛盾"时才出现。 */
+export interface TurnReview {
+  adjusted?: boolean
+  adjustments?: TurnReviewAdjustment[]
+  reason?: string
 }
 
 export interface SkillScore {
@@ -229,14 +263,37 @@ export interface InterviewReport {
   skillScores?: SkillScore[]
 }
 
+/** 岗位匹配的一条：技能 + 简历里的出处。 */
+export interface JobFitMatch {
+  skill: string
+  evidence?: string | null
+}
+
+/** 岗位要求但简历里看不到的技能。 */
+export interface JobFitGap {
+  skill: string
+  why?: string | null
+}
+
+/** JobFitAgent 的产出；没传 JD 的面试为 null。 */
+export interface JobFit {
+  headline?: string | null
+  score?: number | null
+  matched?: JobFitMatch[]
+  gaps?: JobFitGap[]
+  prioritySkills?: string[]
+}
+
 export interface ReportPayload {
   report: InterviewReport
   overallScore: number
+  /** 岗位匹配结论；纯简历面试为 null。 */
+  fit?: JobFit | null
 }
 
 export interface InterviewTurnView {
   seq: number
-  kind: 'MAIN' | 'FOLLOW_UP'
+  kind: 'MAIN' | 'FOLLOW_UP' | 'OPENING'
   parentSeq: number | null
   depth: number
   question: string
@@ -246,13 +303,15 @@ export interface InterviewTurnView {
   score: number | null
   feedback: string | null
   evaluation: TurnEvaluation | null
-  review: unknown
+  review: TurnReview | null
   followUps: string[]
+  /** 出题意图：Interviewer 出这题想验证什么，报告里展示，面试中不打扰。 */
+  intent: string | null
 }
 
 export interface InterviewQuestionView {
   seq: number
-  kind: 'MAIN' | 'FOLLOW_UP'
+  kind: 'MAIN' | 'FOLLOW_UP' | 'OPENING'
   parentSeq: number | null
   depth: number
   question: string

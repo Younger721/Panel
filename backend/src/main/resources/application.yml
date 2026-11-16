@@ -1,17 +1,31 @@
 spring:
   application:
-    name: nova-ai-backend
+    name: panel-backend
   profiles:
     default: dev
   # 直接以 properties 语义加载仓库根 .env：不依赖自定义 EnvironmentPostProcessor 的注册，
   # 缺文件时 optional 不会启动失败。OS 环境变量优先级仍高于这里。
   config:
     import: "optional:file:../.env[.properties],optional:file:./.env[.properties]"
-  # 简历上传：默认 1MB 放不下带图的 PDF/DOCX
+  # 上传：简历按 1MB 设计，知识库文档放宽到 20MB
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 12MB
+      max-file-size: 20MB
+      max-request-size: 40MB
+  # 数据库 schema 由 Flyway 的 db/migration 脚本管理；
+  # Hibernate 只做校验，不建表、不改表、更不会清空数据。
+  # 已有数据库首次启动时 baseline-on-migrate 会把它标记为 V1，不会重复执行 V1。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
+    baseline-description: "existing panel_ai schema"
+    clean-disabled: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
 server:
   port: ${SERVER_PORT:8080}
 management:
@@ -26,8 +40,27 @@ platform-admin:
   username: ${PLATFORM_ADMIN_USERNAME:}
   password: ${PLATFORM_ADMIN_PASSWORD:}
 
-nova:
-  environment: ${NOVA_ENV:dev}
+panel:
+  environment: ${PANEL_ENV:dev}
+
+  # ---------------- KB 检索（K2）与图谱增强 ----------------
+  kb:
+    search:
+      recall-top-k: 30
+      fusion-top-k: 20
+      max-per-document: 2
+      rerank-enabled: true
+    # 图谱通道默认关闭：打开后文档入库会异步抽取实体/关系，检索多一路 graphHits。
+    graph:
+      enabled: ${PANEL_KB_GRAPH_ENABLED:false}
+      max-hops: 1
+      max-neighbors: 20
+      max-chunks: 30
+      min-confidence: 0.6
+      relation-types: CONTRASTS_WITH,CAUSES,PREREQUISITE,DEPENDS_ON,PART_OF,SOLVES,CONFIGURES,MENTIONS
+    # 抽题权重是否走能力值（kb_skill_state）：关掉退回旧的固定启发式，方便 A/B 对比两组分布。
+    quiz:
+      skill-weight: ${PANEL_KB_QUIZ_SKILL_WEIGHT:true}
 
   # ---------------- RAG 检索超参（沿用 GymMind 调优结果） ----------------
   search:
@@ -52,6 +85,13 @@ nova:
       very-long-query-term-threshold: 6
       very-long-query-min-matches: 4
 
+  # 模拟面试编排：多 agent 的模型路由。
+  # 出题和评分固定用主模型（panel.ai.dashscope.chat-model）；只有复核、报告这类
+  # "整理型"任务允许换便宜模型。留空 = 全部沿用主模型，行为与改造前一致。
+  interview:
+    model:
+      cheap: ${PANEL_INTERVIEW_CHEAP_MODEL:}
+
   ai:
     # 阿里百炼（DashScope）OpenAI 兼容接口
     dashscope:
@@ -63,6 +103,54 @@ nova:
       # 扫描件简历 OCR：主模型 + 免费额度用尽时的备用模型
       ocr-model: ${DASHSCOPE_OCR_MODEL:qwen3.5-ocr}
       ocr-fallback-model: ${DASHSCOPE_OCR_FALLBACK_MODEL:qwen3.8-flash}
+
+    # 面试官语音合成。
+    # 注意：TTS 不在 OpenAI 兼容通道（/compatible-mode/v1）里，走的是原生端点，
+    # 所以这里单独一套 endpoint，不复用上面的 base-url。
+    speech:
+      enabled: ${PANEL_SPEECH_ENABLED:true}
+      # 留空则复用 panel.ai.dashscope.api-key
+      api-key: ${DASHSCOPE_SPEECH_API_KEY:}
+      endpoint: ${DASHSCOPE_SPEECH_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer}
+      model: ${DASHSCOPE_SPEECH_MODEL:qwen-audio-3.1-tts-flash}
+      # 龙小夏：普通系统音色组（非 premium），稳重有权威感
+      voice: ${DASHSCOPE_SPEECH_VOICE:longxiaoxia_v3.1}
+      # mp3 已实测可用，体积约为 wav 的 1/2.4
+      format: ${DASHSCOPE_SPEECH_FORMAT:mp3}
+      sample-rate: ${DASHSCOPE_SPEECH_SAMPLE_RATE:24000}
+      instruction: ${DASHSCOPE_SPEECH_INSTRUCTION:语气专业平稳，语速稍慢，吐字清晰}
+      max-chars: ${DASHSCOPE_SPEECH_MAX_CHARS:800}
+      timeout-seconds: ${DASHSCOPE_SPEECH_TIMEOUT:45}
+
+    # 实时语音识别（流式 ASR）：候选人在作答框按住空格说话，边说边上屏。
+    # 走百炼 WebSocket 实时接口，只支持 16kHz PCM；中间结果必须显式打开，
+    # 否则退化成"说完一句才出字"。
+    asr:
+      enabled: ${PANEL_ASR_ENABLED:true}
+      # 留空则复用 panel.ai.dashscope.api-key
+      api-key: ${DASHSCOPE_ASR_API_KEY:}
+      ws-url: ${DASHSCOPE_ASR_WS_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
+      # message 版面向短段输入（语音消息/输入法）：首字最快、上屏最密，实测 2.4 次/秒
+      model: ${DASHSCOPE_ASR_MODEL:qwen-audio-3.1-asr-flash-message}
+      sample-rate: ${DASHSCOPE_ASR_SAMPLE_RATE:16000}
+      format: ${DASHSCOPE_ASR_FORMAT:pcm}
+      # 笔记本麦克风是近场，远场模型断句偏保守
+      vad-model: ${DASHSCOPE_ASR_VAD:near_meeting_16k}
+      # 默认 800ms 会把正常停顿切成碎句
+      max-sentence-silence-ms: ${DASHSCOPE_ASR_MAX_SILENCE:1200}
+      intermediate-results: ${DASHSCOPE_ASR_INTERMEDIATE:true}
+      disfluency-removal: ${DASHSCOPE_ASR_DISFLUENCY:true}
+      heartbeat: ${DASHSCOPE_ASR_HEARTBEAT:true}
+      language-hints: ${DASHSCOPE_ASR_LANG:zh,en}
+      hotwords: ${DASHSCOPE_ASR_HOTWORDS:Kubernetes,RAG,QPS,幂等,微服务,分布式,分库分表}
+      # 单次说话硬上限（秒），到点自动收尾
+      max-session-seconds: ${DASHSCOPE_ASR_MAX_SESSION:90}
+      # 建连后多久没收到音频就断开，防止白占连接
+      idle-timeout-seconds: ${DASHSCOPE_ASR_IDLE_TIMEOUT:5}
+      # 上行帧队列长度（每帧 100ms），满了说明客户端网络跟不上
+      frame-queue-size: ${DASHSCOPE_ASR_QUEUE:50}
+      daily-quota-per-user: ${PANEL_ASR_DAILY_QUOTA:400}
+      max-connections-per-user: ${PANEL_ASR_MAX_CONN_PER_USER:1}
 
     # 联网搜索：面试场景默认关闭，避免引入不可控信息
     web-search:
@@ -78,13 +166,13 @@ nova:
       routing-mode: AUTO
       empty-knowledge-policy: DISCLOSE
       platform-default-plugins: basic_chat,knowledge_search,ai_memory
-      default-system-prompt: 你是 Nova AI 面试助手，基于候选人的简历与目标岗位提问和评分，回答要专业、具体、可追溯，不得编造简历中不存在的内容。
+      default-system-prompt: 你是 Panel 面试助手，基于候选人的简历与目标岗位提问和评分，回答要专业、具体、可追溯，不得编造简历中不存在的内容。
 
   security:
     jwt:
-      issuer: Nova
+      issuer: Panel
       # 至少 32 字节，生产环境务必用环境变量覆盖
-      secret: ${JWT_SECRET:Nova-local-dev-secret-change-me-please-32bytes}
+      secret: ${JWT_SECRET:Panel-local-dev-secret-change-me-please-32bytes}
       access-ttl: PT2H
       refresh-ttl: P7D
 
@@ -99,7 +187,7 @@ nova:
   knowledge:
     # 在线 DOCX 编辑：简历场景用不到，默认关闭
     onlyoffice:
-      enabled: ${NOVA_KNOWLEDGE_ONLYOFFICE_ENABLED:false}
+      enabled: ${PANEL_KNOWLEDGE_ONLYOFFICE_ENABLED:false}
 
   rate-limit:
-    requests-per-minute: ${NOVA_RATE_LIMIT_PER_MINUTE:300}
+    requests-per-minute: ${PANEL_RATE_LIMIT_PER_MINUTE:300}

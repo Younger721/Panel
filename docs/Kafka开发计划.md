@@ -12,8 +12,8 @@
 | 队列抽象 8 个方法：`enqueue / claimNext / advance / retry / complete / recoverExpired / find` | `shared/async/PersistentJobQueue.java` |
 | 任务记录：`id, type, tenantId, status, attempts, nextAttemptAt, leaseUntil, lastError` | `shared/async/PersistentJob.java` |
 | 状态机：`PENDING → RUNNING → COMPLETED / FAILED` | `JobStatus.java` |
-| 三个实现，靠 `nova.job-queue` 切换 | `mysql` / `redis` / `memory`（默认） |
-| 消费方式：**5 秒轮询**，每轮 `recoverExpired` + `claimNext` + 处理 1 个任务 | `KnowledgeIngestWorker:98`（`@Scheduled(fixedDelayString="${nova.knowledge.ingest-delay-ms:5000}")`） |
+| 三个实现，靠 `panel.job-queue` 切换 | `mysql` / `redis` / `memory`（默认） |
+| 消费方式：**5 秒轮询**，每轮 `recoverExpired` + `claimNext` + 处理 1 个任务 | `KnowledgeIngestWorker:98`（`@Scheduled(fixedDelayString="${panel.knowledge.ingest-delay-ms:5000}")`） |
 | 重试：`30s << (attempts-1)`，上限 5 次 | `MySqlPersistentJobQueue.retry` / `RedisStreamPersistentJobQueue.retry` |
 | `enqueue` 幂等：同 `(type, tenantId)` 已有 PENDING/RUNNING 则复用；终态则重置重放 | 两个实现里的 slot / lock 逻辑 |
 | 表 `async_job`：`type, tenant_id, status, attempts, next_attempt_at, lease_until, last_error` | `MySqlPersistentJobQueue` 的 SQL |
@@ -30,7 +30,7 @@
 ```
 生产者                      Kafka                       消费者
 enqueue() ──insert async_job(PENDING)──┐
-    └── send(jobId, key=tenantId) ──► topic: nova.async.job.ready ──► @KafkaListener
+    └── send(jobId, key=tenantId) ──► topic: panel.async.job.ready ──► @KafkaListener
                                                                           │
                                                               claimNext(now, lease)  ← 仍走 DB 的
                                                                           │   FOR UPDATE SKIP LOCKED
@@ -63,7 +63,7 @@ enqueue() ──insert async_job(PENDING)──┐
 | 文件 | 动作 | 说明 |
 |---|---|---|
 | `shared/async/JdbcJobStateStore.java` | **新增** ~140 行 | 8 个方法对应的纯 SQL：`insertPending / claimOne / markRunning / markRetry / markCompleted / resetForReplay / findById / recoverExpiredJobs` |
-| `shared/async/MySqlPersistentJobQueue.java` | 改 | 保留 `@ConditionalOnProperty(nova.job-queue=mysql)`，内部改为委托 `JdbcJobStateStore`（行为不变，`nova.job-queue=mysql` 的回归必须一致） |
+| `shared/async/MySqlPersistentJobQueue.java` | 改 | 保留 `@ConditionalOnProperty(panel.job-queue=mysql)`，内部改为委托 `JdbcJobStateStore`（行为不变，`panel.job-queue=mysql` 的回归必须一致） |
 | `shared/async/KafkaPersistentJobQueue.java` | **新增** ~180 行 | 实现接口：状态委托 `JdbcJobStateStore`，`enqueue`/`retry` 额外发唤醒消息 |
 
 > 只抽一层、不重写，是为了保证 `mysql` 与 `kafka` 两个模式的语义完全一致（幂等 slot、租约、退避都只有一份实现）。
@@ -74,7 +74,7 @@ enqueue() ──insert async_job(PENDING)──┐
 |---|---|
 | `shared/async/kafka/KafkaJobQueueProperties.java` | `bootstrapServers / jobTopic / dlqTopic / consumerGroup / enabled` |
 | `shared/async/kafka/KafkaTopicConfiguration.java` | `NewTopic` bean：`jobTopic` 3 分区、`dlqTopic` 1 分区（`replicas=1`，本地单节点） |
-| `shared/async/kafka/KafkaJobListener.java` | `@KafkaListener(topics="${nova.kafka.job-topic}")`，收到消息后调用 `worker.drainOnce()`；手动 ack，异常进 DLQ |
+| `shared/async/kafka/KafkaJobListener.java` | `@KafkaListener(topics="${panel.kafka.job-topic}")`，收到消息后调用 `worker.drainOnce()`；手动 ack，异常进 DLQ |
 | `shared/async/kafka/KafkaJobPublisher.java` | 封装 `send`，key=`tenantId`（保证同租户顺序），header `type`，失败只记 WARN（不阻塞 enqueue） |
 
 ### 3.3 改造：消费端
@@ -92,8 +92,8 @@ enqueue() ──insert async_job(PENDING)──┐
 
 | Topic | 分区 | 保留 | Key | Value | 用途 |
 |---|---|---|---|---|---|
-| `nova.async.job.ready` | 3 | 1h | `tenantId` | `{"jobId":123}` | 有新任务可领 |
-| `nova.async.job.dlq` | 1 | 7d | `tenantId` | 原消息 + 异常栈 | 消费连续失败（≥5 次）后转人工 |
+| `panel.async.job.ready` | 3 | 1h | `tenantId` | `{"jobId":123}` | 有新任务可领 |
+| `panel.async.job.dlq` | 1 | 7d | `tenantId` | 原消息 + 异常栈 | 消费连续失败（≥5 次）后转人工 |
 
 - `ack-mode: manual_immediate`（或 `record`），**处理完再 ack**；`drainOnce` 内部已是幂等，重复投递最坏情况是空转一次。
 - `auto.offset.reset=earliest`：新实例启动能补到积压（但真正兜底靠 DB 轮询，不依赖它）。
@@ -105,13 +105,13 @@ enqueue() ──insert async_job(PENDING)──┐
 `application-dev.yml` 增加：
 
 ```yaml
-nova:
+panel:
   job-queue: kafka            # memory | mysql | redis | kafka
   kafka:
-    bootstrap-servers: ${NOVA_KAFKA_BOOTSTRAP:localhost:9092}
-    job-topic: nova.async.job.ready
-    dlq-topic: nova.async.job.dlq
-    consumer-group: nova-ingest-workers
+    bootstrap-servers: ${PANEL_KAFKA_BOOTSTRAP:localhost:9092}
+    job-topic: panel.async.job.ready
+    dlq-topic: panel.async.job.dlq
+    consumer-group: panel-ingest-workers
 
 spring:
   kafka:
@@ -128,9 +128,9 @@ spring:
 `.env.example` 增加：
 
 ```
-# ---------- Kafka（nova.job-queue=kafka 时需要） ----------
+# ---------- Kafka（panel.job-queue=kafka 时需要） ----------
 KAFKA_HOST_PORT=9092
-NOVA_KAFKA_BOOTSTRAP=localhost:9092
+PANEL_KAFKA_BOOTSTRAP=localhost:9092
 ```
 
 **端口注意**：`advertised.listeners` 用的是 `localhost:9092`，所以宿主机端口不能被改掉（否则 broker 返回的地址客户端连不上）。要改端口就得加双 listener（`INTERNAL://kafka:9092` + `EXTERNAL://localhost:<port>`），本期不做，保持 9092。
@@ -144,7 +144,7 @@ NOVA_KAFKA_BOOTSTRAP=localhost:9092
 ```yaml
   kafka:
     image: apache/kafka:3.9.1
-    container_name: nova-kafka
+    container_name: panel-kafka
     restart: unless-stopped
     ports:
       - "${KAFKA_HOST_PORT:-9092}:9092"
@@ -185,7 +185,7 @@ docker tag  docker.m.daocloud.io/apache/kafka:3.9.1 apache/kafka:3.9.1
 打完 tag 后，compose 里的 `image: apache/kafka:3.9.1` 直接命中本地镜像，无需改文件。
 （`docker.1panel.live`、`dockerproxy.com` 实测均不可达，只有 `docker.m.daocloud.io` 返回 401 = 可达。）
 
-**环境已验证（本机）**：`apache/kafka:3.9.1`（563MB）已落盘；`docker compose up -d kafka` → `nova-kafka` **healthy**，监听 `0.0.0.0:9092`；两个 topic 已创建（`ready` 3 分区 / `dlq` 1 分区，ISR 正常）；produce→consume 往返成功。
+**环境已验证（本机）**：`apache/kafka:3.9.1`（563MB）已落盘；`docker compose up -d kafka` → `panel-kafka` **healthy**，监听 `0.0.0.0:9092`；两个 topic 已创建（`ready` 3 分区 / `dlq` 1 分区，ISR 正常）；produce→consume 往返成功。
 
 > 另：本仓库原先缺 `.env`，已按 `.env.example` 生成一份（gitignore 内），compose 才能插值 `MINIO_ROOT_*` / `MYSQL_PASSWORD`。
 
@@ -214,7 +214,7 @@ docker tag  docker.m.daocloud.io/apache/kafka:3.9.1 apache/kafka:3.9.1
 
 | # | 任务 | 产出 | 估时 | 验收 | 状态 |
 |---|---|---|---|---|---|
-| T1 | 抽 `JdbcJobStateStore` | 重构 `MySqlPersistentJobQueue` 为委托 | 0.3d | `nova.job-queue=mysql` 编译通过 + 行为不变 | ✅ 完成 |
+| T1 | 抽 `JdbcJobStateStore` | 重构 `MySqlPersistentJobQueue` 为委托 | 0.3d | `panel.job-queue=mysql` 编译通过 + 行为不变 | ✅ 完成 |
 | T2 | `KafkaPersistentJobQueue` | 实现 8 个方法 + 唤醒消息 | 0.5d | 单测：同 `(type,tenant)` 二次 enqueue 返回同 id | ✅ 完成 |
 | T3 | 配置与 topic | Properties + NewTopic + Publisher | 0.3d | 启动后 `kafka-topics.sh --list` 有两个 topic | ✅ 完成 |
 | T4 | 消费端接入 | 监听器调 `KnowledgeIngestWorker.processNext()` | 0.3d | 入队后 <1s 被消费（轮询模式是 ≤5s） | ✅ 完成，已真机验证 |
@@ -223,10 +223,10 @@ docker tag  docker.m.daocloud.io/apache/kafka:3.9.1 apache/kafka:3.9.1
 
 ### 真机验证记录（2026-11-05）
 
-环境：`nova_ai` 库 + 复用 GymMind 的 Redis/MinIO/ES/Milvus + 本项目 `nova-kafka`，`NOVA_JOB_QUEUE=kafka` 启动后端。
+环境：`panel_ai` 库 + 复用 GymMind 的 Redis/MinIO/ES/Milvus + 本项目 `panel-kafka`，`PANEL_JOB_QUEUE=kafka` 启动后端。
 
 ```
-Started NovaApplication in 11.469 seconds
+Started PanelApplication in 11.469 seconds
 Tomcat started on port 8080
 async_job 表自动创建（0 行）
 ```
@@ -240,20 +240,20 @@ id  type         status     attempts
 3   smoke:test   COMPLETED  0
 
 GROUP                TOPIC                  PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
-nova-ingest-workers  nova.async.job.ready   0          1               1               0
-nova-ingest-workers  nova.async.job.ready   1          2               2               0
-nova-ingest-workers  nova.async.job.ready   2          1               1               0
+panel-ingest-workers  panel.async.job.ready   0          1               1               0
+panel-ingest-workers  panel.async.job.ready   1          2               2               0
+panel-ingest-workers  panel.async.job.ready   2          1               1               0
 ```
 
-关键证据：`nova-ingest-workers` 组只有本监听器在消费，位点已提交且 LAG=0 —— 说明消息确实走了
+关键证据：`panel-ingest-workers` 组只有本监听器在消费，位点已提交且 LAG=0 —— 说明消息确实走了
 `Kafka → 监听器 → claimNext → COMPLETED`，而不是被 5 秒轮询捡走的。
 
-**过程中修掉两个迁移遗漏**（都属于"GymMind 有实现、Nova 丢了"）：
+**过程中修掉两个迁移遗漏**（都属于"GymMind 有实现、Panel 丢了"）：
 
 1. `RecommendationCandidateSource` 没有实现豆子（真正实现是健身域的 `ExerciseRecommendationCandidateSource`，
    兜底类 `InMemoryRecommendationCandidateSource` 漏了 `@Component`）→ 应用直接启动失败。已补注解，返回空列表。
 2. `AsyncJobSchemaInitializer` 的 `@ConditionalOnProperty(havingValue="mysql")` 把建表锁死在 MySQL 队列上，
-   但 Kafka 队列同用这张表 → `Table 'nova_ai.async_job' doesn't exist` 每 5 秒刷屏。已改为 mysql/kafka 都建表。
+   但 Kafka 队列同用这张表 → `Table 'panel_ai.async_job' doesn't exist` 每 5 秒刷屏。已改为 mysql/kafka 都建表。
 
 ---
 
@@ -270,13 +270,13 @@ nova-ingest-workers  nova.async.job.ready   2          1               1        
 
 > 场景 2/3/6 是这套设计能讲清楚的三个点：**租约重投、幂等消费、跨实例不重复**。
 
-### 演练结果（2026-11-05 实测，`NOVA_JOB_QUEUE=kafka`）
+### 演练结果（2026-11-05 实测，`PANEL_JOB_QUEUE=kafka`）
 
 | # | 场景 | 实测结果 |
 |---|---|---|
 | 3 | 同一 jobId 连发 10 条消息 | **68ms** 内 `COMPLETED`，`attempts=0` —— 重复消息只抢到一次租约，其余空转 |
-| 5 | 构造一直失败的任务（MinIO 对象缺失） | 首次 `attempts=1`、`last_error=knowledge object is unavailable`；快进 4 轮后 `attempts=5` → **FAILED**，文档同步置 FAILED；**死信已投递**：`nova.async.job.dlq` 收到 `{"jobId":8,"type":"KNOWLEDGE_INGEST:2","error":"knowledge object is unavailable"}` |
-| 4 | `docker stop nova-kafka` 后插入任务 | **3661ms** 内 `COMPLETED`（轮询兜底），应用无异常退出；Kafka 恢复后消费者自动重新入组（LAG=0） |
+| 5 | 构造一直失败的任务（MinIO 对象缺失） | 首次 `attempts=1`、`last_error=knowledge object is unavailable`；快进 4 轮后 `attempts=5` → **FAILED**，文档同步置 FAILED；**死信已投递**：`panel.async.job.dlq` 收到 `{"jobId":8,"type":"KNOWLEDGE_INGEST:2","error":"knowledge object is unavailable"}` |
+| 4 | `docker stop panel-kafka` 后插入任务 | **3661ms** 内 `COMPLETED`（轮询兜底），应用无异常退出；Kafka 恢复后消费者自动重新入组（LAG=0） |
 | 2 | 手工造 `RUNNING` + 过期 60s 租约 | **4483ms** 内被 `recoverExpired` 回收并执行完毕，`attempts` 仍为 0（回收不计重试） |
 
 演练中顺带修掉一个真实缺陷：`KafkaTemplate.send()` 的失败是**异步**的（异常只出现在 `CompletableFuture` 里），

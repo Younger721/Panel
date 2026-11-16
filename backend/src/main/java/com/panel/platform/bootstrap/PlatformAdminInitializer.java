@@ -1,0 +1,84 @@
+package com.panel.platform.bootstrap;
+
+import com.panel.iam.domain.model.Role;
+import com.panel.iam.domain.model.RoleCode;
+import com.panel.iam.domain.model.UserAccount;
+import com.panel.iam.domain.model.UserRole;
+import com.panel.iam.domain.repository.RoleRepository;
+import com.panel.iam.domain.repository.UserAccountRepository;
+import com.panel.iam.domain.repository.UserRoleRepository;
+import org.springframework.stereotype.Component;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
+
+import java.util.Optional;
+
+@Component
+@Order(200)
+public class PlatformAdminInitializer implements ApplicationRunner {
+    private final UserAccountRepository userRepository;
+    private final RoleRepository roleRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final PlatformAdminProperties properties;
+    private final DatabaseInitializationLock initializationLock;
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    public PlatformAdminInitializer(UserAccountRepository userRepository, RoleRepository roleRepository,
+                                    UserRoleRepository userRoleRepository, PlatformAdminProperties properties,
+                                    DatabaseInitializationLock initializationLock) {
+        this.userRepository = userRepository;
+        this.roleRepository = roleRepository;
+        this.userRoleRepository = userRoleRepository;
+        this.properties = properties;
+        this.initializationLock = initializationLock;
+    }
+
+    public void run() {
+        if (properties.isConfigured()) {
+            initializationLock.execute("panel:platform-admin", this::initialize);
+        }
+    }
+
+    @Override
+    public void run(ApplicationArguments args) {
+        run();
+    }
+
+    private void initialize() {
+        Role role = roleRepository.findByCode(RoleCode.PLATFORM_ADMIN)
+                .orElseThrow(() -> new IllegalStateException("PLATFORM_ADMIN role is not initialized"));
+        Optional<UserAccount> existing = userRepository.findByNormalizedEmail(UserAccount.normalizeEmail(properties.getEmail()));
+        if (existing.isEmpty() && properties.getUsername() != null && !properties.getUsername().isBlank()) {
+            existing = userRepository.findByNormalizedUsername(UserAccount.normalizeUsername(properties.getUsername()));
+        }
+        UserAccount user = existing
+                .map(account -> syncPlatformAdminPassword(requirePlatformAccount(account)))
+                .orElseGet(() -> userRepository.save(UserAccount.platformAdmin(
+                        properties.getEmail(),
+                        properties.getUsername(),
+                        passwordEncoder.encode(properties.getPassword()),
+                        "Platform administrator")));
+        if (!userRoleRepository.existsByUserIdAndRoleId(user.getId(), role.getId())) {
+            userRoleRepository.save(UserRole.assign(user, role));
+        }
+    }
+
+    /** 开发环境配置变更时同步平台管理员密码 */
+    private UserAccount syncPlatformAdminPassword(UserAccount user) {
+        if (properties.isForcePasswordSync()
+                && !passwordEncoder.matches(properties.getPassword(), user.getPasswordHash())) {
+            user.resetPassword(passwordEncoder.encode(properties.getPassword()));
+            return userRepository.save(user);
+        }
+        return user;
+    }
+
+    private static UserAccount requirePlatformAccount(UserAccount user) {
+        if (user.getTenantId() != null) {
+            throw new IllegalStateException("Configured platform administrator email belongs to a tenant user");
+        }
+        return user;
+    }
+}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Loader2, Play, Sparkles } from 'lucide-react'
+import AgentSteps from '@/components/AgentSteps'
 import { resumeApi } from '@/api/resume'
 import { interviewApi, type AgentProgress } from '@/api/interview'
-import type { AnalysisStats, ResumeView } from '@/types/api'
+import type { AnalysisStats, InterviewerPersonaView, ResumeView } from '@/types/api'
 
 const FOLLOW_UP_OPTIONS = [0, 1, 2, 3]
 
@@ -16,6 +17,10 @@ export default function InterviewSetupPage() {
   const [stats, setStats] = useState<AnalysisStats | null>(null)
   const [questionCount, setQuestionCount] = useState(5)
   const [followUpLimit, setFollowUpLimit] = useState(2)
+  const [personas, setPersonas] = useState<InterviewerPersonaView[]>([])
+  const [persona, setPersona] = useState('SERIOUS')
+  /** 岗位 JD，可选：留空就是纯简历面试。 */
+  const [jd, setJd] = useState('')
   const [steps, setSteps] = useState<AgentProgress[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,26 +37,32 @@ export default function InterviewSetupPage() {
         setQuestionCount(Math.max(1, Math.min(5, view.stats.points)))
       })
       .catch(err => setError(err instanceof Error ? err.message : '简历还没有批注结果'))
+    interviewApi.personas().then(setPersonas).catch(() => undefined)
   }, [resumeId])
 
   const maxQuestions = Math.max(1, Math.min(10, stats ? stats.points : 10))
+  const activePersona = personas.find(item => item.code === persona)
+  const threshold = activePersona?.followUpThreshold ?? 70
 
   async function start() {
     setBusy(true)
     setError(null)
     setSteps([])
     try {
-      await interviewApi.createStream({ resumeId, questionCount, followUpLimit }, (type, data) => {
-        if (type === 'agent') {
-          setSteps(prev => [...prev.filter(step => step.status === 'COMPLETED'), data as AgentProgress])
-        } else if (type === 'done') {
-          const session = data as { id: number }
-          navigate(`/interview/${session.id}`, { replace: true })
-        } else if (type === 'error') {
-          setError((data as { message?: string }).message || '创建面试失败')
-          setBusy(false)
+      await interviewApi.createStream(
+        { resumeId, questionCount, followUpLimit, persona, jd: jd.trim() || undefined },
+        (type, data) => {
+          if (type === 'agent') {
+            setSteps(prev => [...prev.filter(step => step.status === 'COMPLETED'), data as AgentProgress])
+          } else if (type === 'done') {
+            const session = data as { id: number }
+            navigate(`/interview/${session.id}`, { replace: true })
+          } else if (type === 'error') {
+            setError((data as { message?: string }).message || '创建面试失败')
+            setBusy(false)
+          }
         }
-      })
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建面试失败')
       setBusy(false)
@@ -88,6 +99,41 @@ export default function InterviewSetupPage() {
       </div>
 
       <section className="card space-y-8 p-7">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">面试官</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {personas.length === 0 ? (
+              <div className="col-span-3 rounded-xl border border-dashed border-slate-200 px-3 py-4 text-xs text-slate-400">
+                加载面试官列表…
+              </div>
+            ) : (
+              personas.map(item => {
+                const active = persona === item.code
+                return (
+                  <button
+                    key={item.code}
+                    type="button"
+                    onClick={() => setPersona(item.code)}
+                    disabled={busy}
+                    className={`rounded-xl border px-3.5 py-3 text-left transition-all ${
+                      active
+                        ? 'border-primary-300 bg-primary-50/70 shadow-sm ring-1 ring-primary-200'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className={`text-sm font-semibold ${active ? 'text-primary-700' : 'text-slate-700'}`}>
+                      {item.label}
+                    </span>
+                    <span className="ml-1 text-[11px] text-slate-400">{item.title}</span>
+                    <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-500">{item.description}</p>
+                    <p className="mt-2 font-mono text-[10px] text-slate-400">追问线 {item.followUpThreshold}</p>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+
         <div>
           <div className="flex items-baseline justify-between">
             <label htmlFor="count" className="text-sm font-semibold text-slate-800">
@@ -130,7 +176,29 @@ export default function InterviewSetupPage() {
             ))}
           </div>
           <p className="mt-2 text-xs text-slate-400">
-            回答低于 70 分才会追问，答得好直接进入下一题；最多 {questionCount * (1 + followUpLimit)} 轮对话。
+            回答低于 {threshold} 分才会追问（由面试官人设决定），答得好直接进入下一题；最多{' '}
+            {questionCount * (1 + followUpLimit)} 轮对话。
+          </p>
+        </div>
+
+        <div>
+          <div className="flex items-baseline justify-between">
+            <label htmlFor="jd" className="text-sm font-semibold text-slate-800">
+              岗位 JD
+            </label>
+            <span className="text-[11px] text-slate-400">可选</span>
+          </div>
+          <textarea
+            id="jd"
+            value={jd}
+            onChange={event => setJd(event.target.value)}
+            disabled={busy}
+            rows={4}
+            placeholder="把这岗位的描述粘进来。留空就只按简历出题；粘了会先做一次岗位匹配，岗位要求的技能会优先被问到。"
+            className="mt-3 w-full resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-[12.5px] leading-relaxed text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary-300 focus:ring-1 focus:ring-primary-200 disabled:opacity-60"
+          />
+          <p className="mt-2 text-xs text-slate-400">
+            JD 只影响"先问哪些点"和报告里的匹配结论，不改变评分标准。
           </p>
         </div>
 
@@ -138,8 +206,8 @@ export default function InterviewSetupPage() {
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <Sparkles className="h-3.5 w-3.5 text-primary-500" />
             <span>
-              Planner 从 {stats ? stats.points : '—'} 个批注点里挑 {questionCount} 个，Interviewer 逐题提问，
-              Evaluator 带证据评分，Reviewer 只在一题多解时复核。
+              Planner 从 {stats ? stats.points : '—'} 个批注点里挑 {questionCount} 个 → Interviewer 逐题提问 →
+              技术评委与表达评委并行打分 → Reviewer 只在分数与证据矛盾时复核 → Report 汇总复盘。
             </span>
           </div>
         </div>
@@ -151,25 +219,7 @@ export default function InterviewSetupPage() {
           {busy ? '正在准备…' : '开始面试'}
         </button>
 
-        {steps.length > 0 && (
-          <ul className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
-            {steps.map((step, index) => (
-              <li key={index} className="flex items-center gap-2 text-xs text-slate-600">
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    step.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-amber-500'
-                  }`}
-                />
-                <span className="font-medium">{step.agent}</span>
-                <span className="text-slate-400">{step.stage}</span>
-                {step.message && <span className="truncate text-slate-400">· {step.message}</span>}
-                {step.status === 'COMPLETED' && step.durationMs > 0 && (
-                  <span className="ml-auto font-mono text-[10px] text-slate-400">{step.durationMs}ms</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+        <AgentSteps steps={steps} />
       </section>
     </div>
   )

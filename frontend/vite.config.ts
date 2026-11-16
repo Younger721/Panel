@@ -17,8 +17,13 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        target: 'http://127.0.0.1:8081',
         changeOrigin: true
+      },
+      // 实时语音识别：浏览器 ↔ 后端 ↔ 百炼，浏览器这一跳是原生 WebSocket
+      '/ws': {
+        target: 'ws://127.0.0.1:8081',
+        ws: true
       }
     }
   }

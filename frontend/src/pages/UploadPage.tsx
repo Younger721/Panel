@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CheckCircle2, FileText, Loader2, Upload, X } from 'lucide-react'
 import { resumeApi } from '@/api/resume'
@@ -12,6 +12,31 @@ const STATUS_TEXT: Record<ResumeStatus, string> = {
   FAILED: '解析失败'
 }
 
+/** 与后端 ResumeService.MAX_BYTES 对齐的 10MB。 */
+const MAX_BYTES = 10 * 1024 * 1024
+/**
+ * 与后端 ResumeService.normalizeContentType 的白名单保持一致。
+ *
+ * <p>`.md` 是后端原生支持的简历格式（解析器认标题和列表，比 txt 分得更细），
+ * 这里漏掉的话用户会被前端拦在门外，明明后端收。</p>
+ */
+const ALLOWED_SUFFIXES = ['.pdf', '.docx', '.md', '.txt']
+
+/** 本机预检：返回不能上传的原因，能传就返回 null。 */
+function rejectReason(file: File): string | null {
+  const name = file.name.toLowerCase()
+  if (!ALLOWED_SUFFIXES.some(suffix => name.endsWith(suffix))) {
+    return '只支持 PDF、Word（.docx）、Markdown（.md）和纯文本（.txt）简历'
+  }
+  if (file.size === 0) {
+    return '这个文件是空的'
+  }
+  if (file.size > MAX_BYTES) {
+    return `文件 ${(file.size / 1024 / 1024).toFixed(1)} MB，超过 10 MB 上限`
+  }
+  return null
+}
+
 export default function UploadPage() {
   const navigate = useNavigate()
   const [dragging, setDragging] = useState(false)
@@ -19,24 +44,62 @@ export default function UploadPage() {
   const [active, setActive] = useState<ResumeView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  /** 轮询代次：重新上传/离开页面时作废旧的那一轮，避免旧结果覆盖新的。 */
+  const pollTokenRef = useRef(0)
 
+  useEffect(
+    () => () => {
+      pollTokenRef.current += 1
+    },
+    []
+  )
+
+  /**
+   * 轮询解析进度。
+   *
+   * <p>以前这里有两个坑：catch 里直接 return（一次网络抖动就把进度永久钉住），
+   * 以及循环走完 90 次也不告诉用户（页面一直转圈，其实任务早就没在等了）。
+   * 现在一次失败继续重试，连续三次才放弃并给出"去简历库看"的出口。</p>
+   */
   const poll = useCallback(async (id: number) => {
+    const token = ++pollTokenRef.current
+    let failures = 0
     for (let i = 0; i < 90; i += 1) {
       await new Promise(resolve => window.setTimeout(resolve, 2000))
+      if (pollTokenRef.current !== token) {
+        return
+      }
       try {
         const view = await resumeApi.find(id)
+        if (pollTokenRef.current !== token) {
+          return
+        }
+        failures = 0
         setActive(view)
         if (view.status === 'PARSED' || view.status === 'FAILED') {
           return
         }
       } catch {
-        return
+        failures += 1
+        if (failures >= 3) {
+          setError('获取解析进度失败，可以到「简历库」查看结果')
+          return
+        }
       }
     }
+    setError('解析用时超出预期，可以到「简历库」继续查看进度')
   }, [])
 
   const upload = useCallback(
     async (file: File) => {
+      // 先在本机拦一道：后端只收 10MB / pdf,docx,md,txt，不拦的话用户要等整个文件
+      // 传完（几十秒）才收到 400，网慢的时候尤其难受。拖拽不受 accept 约束。
+      const rejection = rejectReason(file)
+      if (rejection) {
+        setActive(null)
+        setError(rejection)
+        return
+      }
       setUploading(true)
       setError(null)
       setActive(null)
@@ -95,7 +158,7 @@ export default function UploadPage() {
               <Upload className="h-10 w-10" />
             </div>
             <h3 className="mb-2 text-xl font-semibold text-slate-900">点击或拖拽文件至此处</h3>
-            <p className="mb-6 text-slate-400">支持 PDF, DOCX, TXT（最大 10MB）</p>
+            <p className="mb-6 text-slate-400">支持 PDF / DOCX / MD / TXT（最大 10MB）</p>
             <button
               type="button"
               className="btn-primary px-8 py-3.5 text-base"
@@ -110,7 +173,7 @@ export default function UploadPage() {
               ref={inputRef}
               type="file"
               className="hidden"
-              accept=".pdf,.docx,.doc,.txt"
+              accept=".pdf,.docx,.md,.txt"
               onChange={event => {
                 const file = event.target.files?.[0]
                 if (file) {

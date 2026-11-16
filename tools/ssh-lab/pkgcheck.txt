@@ -1,0 +1,4 @@
+for p in openjdk-21-jdk-headless mysql-server redis-server nginx docker.io maven; do printf "%-26s " "$p"; apt-cache policy "$p" 2>/dev/null | awk '/Candidate:/{print $2}'; done
+echo "--- swap ---"; swapon --show
+echo "--- apt lists ---"; ls /var/lib/apt/lists/ 2>/dev/null | wc -l
+echo "--- mem available ---"; free -m | awk '/Mem:/{print $7" MB avail"}'

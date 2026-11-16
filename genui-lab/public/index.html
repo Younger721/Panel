@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>genui-lab · 界面生成器</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <strong>genui-lab</strong>
+      <span class="sub">让模型直接生成界面，而不是文字</span>
+    </div>
+    <div class="meta">
+      <select id="scenario" class="sel" title="场景">
+        <option value="travel">旅行规划</option>
+        <option value="finance">财务报表</option>
+        <option value="fitness">训练计划</option>
+      </select>
+      <select id="theme" class="sel" title="主题">
+        <option value="dusk">Dusk</option>
+        <option value="paper">Paper</option>
+        <option value="terminal">Terminal</option>
+      </select>
+      <span id="mode" class="badge">mock</span>
+      <button id="clear" class="ghost" title="清空">清空</button>
+    </div>
+  </header>
+
+  <main id="log" class="log">
+    <section class="hello">
+      <h1>问点什么</h1>
+      <div class="presets" id="presets"></div>
+    </section>
+  </main>
+
+  <footer class="composer">
+    <input id="input" type="text" placeholder="杭州两日游怎么安排 / 三个方案哪个便宜 / 1234*5678 / 来个游戏" autocomplete="off" />
+    <button id="send">发送</button>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
