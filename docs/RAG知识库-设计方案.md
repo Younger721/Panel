@@ -66,7 +66,7 @@
 
 **K0 预验证（2026-11-08，已做完）**：用 `panel_ai` 起了一个干净实例（8081，不碰 8080），结果：
 
-- 29 张表自动建齐（`sys_*`、`resume`、`interview_*`、`knowledge_*`），`admin/123456` 登录成功，返回 **56 个权限**；
+- 29 张表自动建齐（`sys_*`、`resume`、`interview_*`、`knowledge_*`），`admin` 账号登录成功，返回 **56 个权限**；
 - `GET /api/v1/knowledge/documents` 返回 **403**（不是 500）——正好坐实"平台管理员被 legacy 租户校验拦住"，K1 改权限即可；
 - `GET /api/v1/ai/harness/config`、`/api/v1/interview/resumes` 均 200，说明旧实例的 500 是构建陈旧；
 - 没有额外创建 ES 索引 / Milvus collection，`gymmind-knowledge`（291）与 `gymmind_knowledge` 均原样。

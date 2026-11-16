@@ -3,7 +3,7 @@
  * 端到端冒烟：登录 → 找一份已解析的简历 → 建面试 → 逐题回答 → 出报告。
  *
  *   node scripts/smoke-interview.mjs
- *   PANEL_BASE=http://127.0.0.1:8080 PANEL_USER=admin PANEL_PASS=123456 node scripts/smoke-interview.mjs
+ *   PANEL_BASE=http://127.0.0.1:8080 PANEL_USER=admin PANEL_PASS=<密码> node scripts/smoke-interview.mjs
  *
  * 会真实调用大模型（一份 2 题 / 追问 1 次的面试约 1 分钟），用于发版前回归。
  */

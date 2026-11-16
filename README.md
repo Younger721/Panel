@@ -266,10 +266,10 @@ npm run dev          # http://localhost:5173，/api 已代理到 8080
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"tenantCode":"demo","tenantName":"Demo","email":"demo@panel.dev","password":"********","displayName":"李想"}'
+  -d '{"tenantCode":"myteam","tenantName":"My Team","email":"you@example.com","password":"<自己设一个强密码>","displayName":"张三"}'
 ```
 
-登录名是邮箱 `@` 前面那一段（上面的例子即 `demo`）。
+登录名是邮箱 `@` 前面那一段（上面的例子即 `you`）。
 
 ### 6. 跑一遍主链路
 
